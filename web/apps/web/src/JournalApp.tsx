@@ -81,7 +81,6 @@ type MeetingPreview = {
   locationFound: boolean;
 };
 
-  about: string;
 type LightboxState = {
   url: string;
   mimeType: string;
