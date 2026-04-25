@@ -4,6 +4,6 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: ["mapories.deakteri.cloud"],
+    allowedHosts: ["mapories.deakteri.cloud", "https://mapories.deakteri.cloud"],
   },
 });
