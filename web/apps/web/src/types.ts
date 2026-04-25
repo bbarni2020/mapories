@@ -11,12 +11,14 @@ export type Journal = {
   id: string;
   name: string;
   createdAt: string;
+  memberCount: number;
 };
 
 export type Marker = {
   id: string;
   meetingAt: string;
   locationName: string;
+  photoDataUrl?: string | null;
   latitude: number;
   longitude: number;
 };

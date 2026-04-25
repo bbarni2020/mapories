@@ -114,6 +114,7 @@ model Meeting {
   title        String
   meetingAt    DateTime
   locationName String
+  photoDataUrl String?
   latitude     Decimal   @db.Decimal(9, 6)
   longitude    Decimal   @db.Decimal(9, 6)
   createdById  String

@@ -114,6 +114,50 @@ const lookupHash = (value: string): string =>
 const checksum = (value: Buffer): string =>
   createHash("sha256").update(value).digest("hex");
 
+const AUTO_JOURNAL_PREFIX = "auto:";
+
+const normalizeJournalName = (value: string): string => value.trim().replace(/\s+/g, " ");
+
+const asBoundedJournalName = (value: string): string => {
+  if (value.length <= 120) {
+    return value;
+  }
+
+  return `${value.slice(0, 117)}...`;
+};
+
+const isAutoJournalName = (value: string): boolean => value.startsWith(AUTO_JOURNAL_PREFIX);
+
+const buildParticipantsJournalName = async (journalId: string): Promise<string> => {
+  const members = await prisma.journalMember.findMany({
+    where: { journalId },
+    select: {
+      joinedAt: true,
+      user: {
+        select: {
+          nameEncrypted: true,
+        },
+      },
+    },
+    orderBy: { joinedAt: "asc" },
+  });
+
+  const names = members
+    .map((member) => decryptString(member.user.nameEncrypted).trim())
+    .filter((name) => name.length > 0)
+    .slice(0, 6);
+  const fallback = `${AUTO_JOURNAL_PREFIX}Journal`;
+
+  if (!names.length) {
+    return fallback;
+  }
+
+  return asBoundedJournalName(`${AUTO_JOURNAL_PREFIX}${names.join(" & ")}`);
+};
+
+const asDisplayJournalName = (value: string): string =>
+  isAutoJournalName(value) ? value.slice(AUTO_JOURNAL_PREFIX.length) : value;
+
 const getAuth = (request: FastifyRequest): { userId: string; role: Role } => {
   const payload = request.user as { sub: string; role: Role };
   return { userId: payload.sub, role: payload.role };
@@ -838,16 +882,18 @@ app.post(
 );
 
 const createJournalSchema = z.object({
-  name: z.string().min(2).max(120),
+  name: z.string().max(120).optional(),
 });
 
 app.post("/journals", { preHandler: ensureAuth }, async (request) => {
   const auth = getAuth(request);
   const body = createJournalSchema.parse(request.body);
+  const customName = body.name ? normalizeJournalName(body.name) : "";
+  const initialName = customName.length >= 2 ? customName : `${AUTO_JOURNAL_PREFIX}user1`;
 
   const journal = await prisma.journal.create({
     data: {
-      name: body.name,
+      name: initialName,
       createdById: auth.userId,
       members: {
         create: {
@@ -857,7 +903,49 @@ app.post("/journals", { preHandler: ensureAuth }, async (request) => {
     },
   });
 
+  if (customName.length < 2) {
+    const generatedName = await buildParticipantsJournalName(journal.id);
+    const renamed = await prisma.journal.update({
+      where: { id: journal.id },
+      data: { name: generatedName },
+    });
+
+    await writeAuditLog(auth.userId, "journal.create", { journalId: journal.id });
+    return renamed;
+  }
+
   await writeAuditLog(auth.userId, "journal.create", { journalId: journal.id });
+  return journal;
+});
+
+const renameJournalSchema = z.object({
+  name: z.string().min(2).max(120),
+});
+
+app.patch("/journals/:journalId", { preHandler: ensureAuth }, async (request, reply) => {
+  const auth = getAuth(request);
+  const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
+  const body = renameJournalSchema.parse(request.body);
+
+  const isMember = await ensureJournalMember(params.journalId, auth.userId);
+  if (!isMember) {
+    return reply.forbidden("Not a member of this journal");
+  }
+
+  const journal = await prisma.journal.update({
+    where: { id: params.journalId },
+    data: { name: normalizeJournalName(body.name) },
+    select: {
+      id: true,
+      name: true,
+      createdAt: true,
+    },
+  });
+
+  await writeAuditLog(auth.userId, "journal.rename", {
+    journalId: journal.id,
+  });
+
   return journal;
 });
 
@@ -872,9 +960,39 @@ app.get("/journals", { preHandler: ensureAuth }, async (request) => {
           id: true,
           name: true,
           createdAt: true,
+          _count: {
+            select: {
+              members: true,
+            },
+          },
         },
       },
     },
+  }).then((rows) =>
+    rows.map((row) => ({
+      journal: {
+        ...row.journal,
+        name: asDisplayJournalName(row.journal.name),
+      },
+    })),
+  );
+});
+
+app.get("/journals/:journalId/members", { preHandler: ensureAuth }, async (request, reply) => {
+  const auth = getAuth(request);
+  const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
+
+  const isMember = await ensureJournalMember(params.journalId, auth.userId);
+  if (!isMember) {
+    return reply.forbidden("Not a member of this journal");
+  }
+
+  return prisma.journalMember.findMany({
+    where: { journalId: params.journalId },
+    select: {
+      userId: true,
+    },
+    orderBy: { joinedAt: "asc" },
   });
 });
 
@@ -921,6 +1039,16 @@ app.post("/journals/join", { preHandler: ensureAuth }, async (request, reply) =>
     return reply.badRequest("Invite code is invalid or expired");
   }
 
+  const alreadyMember = await prisma.journalMember.findUnique({
+    where: {
+      journalId_userId: {
+        journalId: invite.journalId,
+        userId: auth.userId,
+      },
+    },
+    select: { userId: true },
+  });
+
   await prisma.journalMember.upsert({
     where: {
       journalId_userId: {
@@ -935,6 +1063,57 @@ app.post("/journals/join", { preHandler: ensureAuth }, async (request, reply) =>
     },
   });
 
+  if (!alreadyMember) {
+    const latestEnvelope = await prisma.journalKeyEnvelope.findFirst({
+      where: { journalId: invite.journalId },
+      orderBy: [{ keyVersion: "desc" }, { createdAt: "desc" }],
+      select: {
+        keyVersion: true,
+        encryptedKey: true,
+        algorithm: true,
+        senderUserId: true,
+      },
+    });
+
+    if (latestEnvelope) {
+      await prisma.journalKeyEnvelope.upsert({
+        where: {
+          journalId_keyVersion_recipientUserId: {
+            journalId: invite.journalId,
+            keyVersion: latestEnvelope.keyVersion,
+            recipientUserId: auth.userId,
+          },
+        },
+        update: {
+          encryptedKey: latestEnvelope.encryptedKey,
+          algorithm: latestEnvelope.algorithm,
+          senderUserId: latestEnvelope.senderUserId,
+        },
+        create: {
+          journalId: invite.journalId,
+          keyVersion: latestEnvelope.keyVersion,
+          recipientUserId: auth.userId,
+          senderUserId: latestEnvelope.senderUserId,
+          encryptedKey: latestEnvelope.encryptedKey,
+          algorithm: latestEnvelope.algorithm,
+        },
+      });
+    }
+  }
+
+  const joinedJournal = await prisma.journal.findUnique({
+    where: { id: invite.journalId },
+    select: { name: true },
+  });
+
+  if (joinedJournal && isAutoJournalName(joinedJournal.name)) {
+    const generatedName = await buildParticipantsJournalName(invite.journalId);
+    await prisma.journal.update({
+      where: { id: invite.journalId },
+      data: { name: generatedName },
+    });
+  }
+
   await writeAuditLog(auth.userId, "journal.join", { journalId: invite.journalId });
   return { joined: true, journalId: invite.journalId };
 });
@@ -943,6 +1122,7 @@ const createMeetingSchema = z.object({
   title: z.string().min(2).max(160),
   meetingAt: z.coerce.date(),
   locationName: z.string().min(2).max(200),
+  photoDataUrl: z.string().max(1_200_000).optional(),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
 });
@@ -963,6 +1143,7 @@ app.post("/journals/:journalId/meetings", { preHandler: ensureAuth }, async (req
       title: body.title,
       meetingAt: body.meetingAt,
       locationName: body.locationName,
+      photoDataUrl: body.photoDataUrl,
       latitude: body.latitude,
       longitude: body.longitude,
       createdById: auth.userId,
@@ -988,6 +1169,7 @@ app.get("/journals/:journalId/markers", { preHandler: ensureAuth }, async (reque
       id: true,
       meetingAt: true,
       locationName: true,
+      photoDataUrl: true,
       latitude: true,
       longitude: true,
     },
@@ -1155,7 +1337,7 @@ const createPostSchema = z.object({
         nonceBase64: z.string().min(8),
       }),
     )
-    .max(5)
+    .max(20)
     .default([]),
 });
 
@@ -1304,6 +1486,57 @@ app.get("/meetings/:meetingId/posts", { preHandler: ensureAuth }, async (request
       ivBase64: iv.toString("base64"),
     };
   });
+});
+
+app.get("/journals/:journalId/posts", { preHandler: ensureAuth }, async (request, reply) => {
+  const auth = getAuth(request);
+  const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
+
+  const isMember = await ensureJournalMember(params.journalId, auth.userId);
+  if (!isMember) {
+    return reply.forbidden("Not a member of this journal");
+  }
+
+  const now = new Date();
+  const posts = await prisma.post.findMany({
+    where: {
+      visibleAfter: { lte: now },
+      meeting: {
+        journalId: params.journalId,
+      },
+    },
+    select: {
+      id: true,
+      createdAt: true,
+      visibleAfter: true,
+      author: {
+        select: {
+          id: true,
+          nameEncrypted: true,
+        },
+      },
+      meeting: {
+        select: {
+          id: true,
+          title: true,
+          locationName: true,
+          meetingAt: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return posts.map((post) => ({
+    id: post.id,
+    createdAt: post.createdAt,
+    visibleAfter: post.visibleAfter,
+    authorName: decryptString(post.author.nameEncrypted),
+    authorId: post.author.id,
+    about: post.meeting.title || post.meeting.locationName,
+    locationName: post.meeting.locationName,
+    meetingAt: post.meeting.meetingAt,
+  }));
 });
 
 app.get("/media/:mediaId", { preHandler: ensureAuth }, async (request, reply) => {
