@@ -1,0 +1,216 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MODERATOR
+  ARTIST
+  USER
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+  TEAM
+}
+
+model User {
+  id                    String            @id @default(cuid())
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  lastActiveAt          DateTime?
+  role                  Role              @default(USER)
+  emailHash             String            @unique
+  emailEncrypted        Bytes
+  nameEncrypted         Bytes
+  passwordHash          String?
+  googleSubHash         String?           @unique
+  publicEncryptionKey   String?
+  journals              JournalMember[]
+  posts                 Post[]
+  subscriptions         UserSubscription[]
+  auditLogs             AuditLog[]
+  refreshSessions       RefreshTokenSession[]
+  deviceKeys            UserDeviceKey[]
+  keyEnvelopes          JournalKeyEnvelope[]
+}
+
+model UserSubscription {
+  id                      String            @id @default(cuid())
+  userId                  String
+  planId                  String?
+  tier                    SubscriptionTier  @default(FREE)
+  priceCents              Int?
+  isComplimentary         Boolean           @default(false)
+  grantedByAdminId        String?
+  grantReason             String?
+  monthlyUploadLimitBytes BigInt            @default(1073741824)
+  usedUploadBytes         BigInt            @default(0)
+  startsAt                DateTime          @default(now())
+  endsAt                  DateTime?
+  user                    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                    SubscriptionPlan? @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  @@index([userId, endsAt])
+  @@index([planId])
+}
+
+model SubscriptionPlan {
+  id                      String            @id @default(cuid())
+  name                    String            @unique
+  tier                    SubscriptionTier
+  priceCents              Int
+  monthlyUploadLimitBytes BigInt
+  isActive                Boolean           @default(true)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  subscriptions           UserSubscription[]
+}
+
+model Journal {
+  id          String          @id @default(cuid())
+  name        String
+  createdById String
+  createdAt   DateTime        @default(now())
+  members     JournalMember[]
+  meetings    Meeting[]
+  invites     JournalInvite[]
+  keyEnvelopes JournalKeyEnvelope[]
+
+  @@index([createdById])
+}
+
+model JournalMember {
+  journalId String
+  userId    String
+  joinedAt  DateTime @default(now())
+  journal   Journal  @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([journalId, userId])
+}
+
+model JournalInvite {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  journalId   String
+  createdById String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  journal     Journal  @relation(fields: [journalId], references: [id], onDelete: Cascade)
+
+  @@index([journalId])
+}
+
+model Meeting {
+  id           String    @id @default(cuid())
+  journalId    String
+  title        String
+  meetingAt    DateTime
+  locationName String
+  latitude     Decimal   @db.Decimal(9, 6)
+  longitude    Decimal   @db.Decimal(9, 6)
+  createdById  String
+  createdAt    DateTime  @default(now())
+  journal      Journal   @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  posts        Post[]
+
+  @@index([journalId, meetingAt])
+}
+
+model Post {
+  id           String      @id @default(cuid())
+  meetingId    String
+  authorId     String
+  ciphertext   Bytes
+  iv           Bytes
+  algorithm    String      @default("AES-256-GCM")
+  visibleAfter DateTime
+  createdAt    DateTime    @default(now())
+  meeting      Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  author       User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  media        MediaAsset[]
+
+  @@index([meetingId, visibleAfter])
+  @@index([authorId, createdAt])
+}
+
+model MediaAsset {
+  id              String   @id @default(cuid())
+  postId          String
+  mimeType        String
+  sizeBytes       Int
+  checksum        String
+  blobEncrypted   Bytes
+  nonce           Bytes
+  createdAt       DateTime @default(now())
+  post            Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([checksum])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model RefreshTokenSession {
+  id              String    @id @default(cuid())
+  userId          String
+  tokenHash       String    @unique
+  csrfTokenHash   String?
+  userAgent       String?
+  ipAddress       String?
+  deviceLabel     String?
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  replacedById    String?
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([revokedAt])
+}
+
+model UserDeviceKey {
+  id             String   @id @default(cuid())
+  userId         String
+  keyVersion     Int
+  publicKey      String
+  algorithm      String   @default("X25519")
+  createdAt      DateTime @default(now())
+  revokedAt      DateTime?
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, keyVersion])
+  @@index([userId, revokedAt])
+}
+
+model JournalKeyEnvelope {
+  id                 String   @id @default(cuid())
+  journalId          String
+  keyVersion         Int
+  recipientUserId    String
+  senderUserId       String
+  encryptedKey       Bytes
+  algorithm          String   @default("X25519-XSalsa20-Poly1305")
+  createdAt          DateTime @default(now())
+  journal            Journal  @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  recipientUser      User     @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([journalId, keyVersion, recipientUserId])
+  @@index([recipientUserId, createdAt])
+}

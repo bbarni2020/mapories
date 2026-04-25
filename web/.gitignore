@@ -1,0 +1,12 @@
+node_modules
+.env
+.env.*
+!.env.example
+dist
+coverage
+apps/*/node_modules
+apps/*/dist
+apps/*/.vite
+apps/*/tsconfig.tsbuildinfo
+.DS_Store
+*.log

@@ -1,0 +1,110 @@
+:root {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #0d1b1e;
+  background: #f2f7f5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #e7f3ef 0%, #f7fbfa 40%, #eff6f5 100%);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  width: min(1200px, 100% - 2rem);
+  margin: 1rem auto 3rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.panel {
+  background: #ffffffcc;
+  border: 1px solid #d7e3de;
+  border-radius: 12px;
+  padding: 1rem;
+  backdrop-filter: blur(4px);
+}
+
+.stack {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.grid-two {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+.row-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.card {
+  border: 1px solid #d8e4df;
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mono {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.map-wrap {
+  min-height: 340px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #d2dfd9;
+}
+
+.error {
+  color: #b42318;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid #b7c7c0;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  background: #fbfefd;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  background: #0a9396;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #90aead;
+  cursor: not-allowed;
+}
+
+@media (min-width: 900px) {
+  .grid-two {
+    grid-template-columns: 1fr 1fr;
+  }
+}

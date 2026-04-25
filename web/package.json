@@ -1,0 +1,14 @@
+{
+  "name": "mapories",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @mapories/api & npm run dev --workspace @mapories/web",
+    "build": "npm run build --workspace @mapories/api && npm run build --workspace @mapories/web",
+    "lint": "npm run lint --workspace @mapories/api && npm run lint --workspace @mapories/web"
+  }
+}
