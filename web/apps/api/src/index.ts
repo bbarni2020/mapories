@@ -1488,57 +1488,6 @@ app.get("/meetings/:meetingId/posts", { preHandler: ensureAuth }, async (request
   });
 });
 
-app.get("/journals/:journalId/posts", { preHandler: ensureAuth }, async (request, reply) => {
-  const auth = getAuth(request);
-  const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
-
-  const isMember = await ensureJournalMember(params.journalId, auth.userId);
-  if (!isMember) {
-    return reply.forbidden("Not a member of this journal");
-  }
-
-  const now = new Date();
-  const posts = await prisma.post.findMany({
-    where: {
-      visibleAfter: { lte: now },
-      meeting: {
-        journalId: params.journalId,
-      },
-    },
-    select: {
-      id: true,
-      createdAt: true,
-      visibleAfter: true,
-      author: {
-        select: {
-          id: true,
-          nameEncrypted: true,
-        },
-      },
-      meeting: {
-        select: {
-          id: true,
-          title: true,
-          locationName: true,
-          meetingAt: true,
-        },
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-
-  return posts.map((post) => ({
-    id: post.id,
-    createdAt: post.createdAt,
-    visibleAfter: post.visibleAfter,
-    authorName: decryptString(post.author.nameEncrypted),
-    authorId: post.author.id,
-    about: post.meeting.title || post.meeting.locationName,
-    locationName: post.meeting.locationName,
-    meetingAt: post.meeting.meetingAt,
-  }));
-});
-
 app.get("/media/:mediaId", { preHandler: ensureAuth }, async (request, reply) => {
   const auth = getAuth(request);
   const params = z.object({ mediaId: z.string().cuid() }).parse(request.params);

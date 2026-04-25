@@ -81,24 +81,14 @@ type MeetingPreview = {
   locationFound: boolean;
 };
 
-type VisiblePost = {
-  id: string;
-  createdAt: string;
-  visibleAfter: string;
-  authorId: string;
-  authorName: string;
   about: string;
-  locationName: string;
-  meetingAt: string;
-};
-
 type LightboxState = {
   url: string;
   mimeType: string;
   title: string;
 };
 
-type SectionKey = "journals" | "home" | "posts" | "visible" | "admin";
+type SectionKey = "journals" | "meetings" | "posts" | "visible" | "admin";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 const DEFAULT_CENTER: [number, number] = [47.4979, 19.0402];
@@ -266,7 +256,7 @@ const GoogleIcon = () => (
 
 const sectionConfig: Array<{ key: SectionKey; label: string; icon: () => JSX.Element }> = [
   { key: "journals", label: "Journals", icon: BookIcon },
-  { key: "home", label: "Home", icon: MapIcon },
+  { key: "meetings", label: "Meetings", icon: MapIcon },
   { key: "posts", label: "Posts", icon: PostIcon },
   { key: "visible", label: "Visible Posts", icon: VisibleIcon },
   { key: "admin", label: "Admin", icon: ShieldIcon },
@@ -276,7 +266,7 @@ const tabItems = sectionConfig.filter((item) => item.key !== "admin");
 
 const sectionTitleMap: Record<SectionKey, string> = {
   journals: "Journals",
-  home: "Journal home",
+  meetings: "Meetings",
   posts: "Posts",
   visible: "Visible posts",
   admin: "Admin platform",
@@ -315,7 +305,6 @@ export const App = () => {
 
   const [posts, setPosts] = useState<MeetingPost[]>([]);
   const [decryptedPosts, setDecryptedPosts] = useState<Record<string, string>>({});
-  const [releasedPosts, setReleasedPosts] = useState<VisiblePost[]>([]);
   const [postText, setPostText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentPreviews, setAttachmentPreviews] = useState<AttachmentPreview[]>([]);
@@ -428,16 +417,6 @@ export const App = () => {
     }
   };
 
-  const refreshReleasedPosts = async (journalId: string) => {
-    if (!journalId) {
-      setReleasedPosts([]);
-      return;
-    }
-
-    const response = await api.get<VisiblePost[]>(`/journals/${journalId}/posts`);
-    setReleasedPosts(response.data);
-  };
-
   useEffect(() => {
     setAuthToken(token);
     if (!token) {
@@ -446,7 +425,6 @@ export const App = () => {
       setJournalSecrets({});
       setMarkers([]);
       setPosts([]);
-      setReleasedPosts([]);
       setDecryptedPosts({});
       setAdminOverview(null);
       setAdminUsers([]);
@@ -498,7 +476,6 @@ export const App = () => {
     }
 
     refreshMarkers(selectedJournalId).catch(() => setError("Could not load map markers"));
-    refreshReleasedPosts(selectedJournalId).catch(() => setError("Could not load released posts"));
   }, [selectedJournalId]);
 
   useEffect(() => {
@@ -557,12 +534,6 @@ export const App = () => {
     }
   }, [selectedJournalId, activeSection]);
 
-  useEffect(() => {
-    if (selectedJournalId && activeSection === "journals") {
-      setActiveSection("home");
-    }
-  }, [selectedJournalId, activeSection]);
-
   const selectedJournal = useMemo(
     () => journals.find((journal) => journal.id === selectedJournalId) ?? null,
     [journals, selectedJournalId],
@@ -588,20 +559,6 @@ export const App = () => {
     setSelectedMeetingId(meetingId);
     await refreshPosts(meetingId);
     setActiveSection("visible");
-  };
-
-  const pickMeetingForPost = async (meetingId: string) => {
-    setSelectedMeetingId(meetingId);
-    await refreshPosts(meetingId);
-    setActiveSection("posts");
-  };
-
-  const openJournal = (journalId: string) => {
-    setSelectedJournalId(journalId);
-    setSelectedMeetingId("");
-    setPosts([]);
-    setDecryptedPosts({});
-    setActiveSection("home");
   };
 
   const ensureJournalSecret = async (journalId: string): Promise<string> => {
@@ -851,7 +808,6 @@ export const App = () => {
     setPostText("");
     setFiles([]);
     await refreshPosts(selectedMeetingId);
-    await refreshReleasedPosts(selectedJournalId);
   };
 
   const decryptLoadedPosts = async () => {
@@ -1127,94 +1083,23 @@ export const App = () => {
       );
     }
 
-    if (activeSection === "home") {
-      return (
-        <section className="screen-panel">
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">{sectionTitleMap.home}</p>
-              <h2>A map of everywhere this journal has gone.</h2>
-            </div>
-            <div className="section-actions">
-              <span className="lock-badge">
-                <MapIcon />
-                {selectedJournal ? selectedJournal.name : "Select a journal"}
-              </span>
-            </div>
-          </div>
-
-          <div className="journal-home-layout">
-            <div className="home-map-card panel-soft">
-              <div className="map-wrap home-map-wrap">
-                <MapContainer center={selectedCenter} zoom={6} scrollWheelZoom style={{ height: "100%" }}>
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                  />
-                  {markers.map((marker) => (
-                    <Marker key={marker.id} position={[marker.latitude, marker.longitude]} icon={warmPinIcon}>
-                      <Popup>
-                        <strong>{marker.locationName}</strong>
-                        {marker.photoDataUrl ? (
-                          <>
-                            <br />
-                            <img src={marker.photoDataUrl} alt={marker.locationName} style={{ width: 180, borderRadius: 8, marginTop: 8 }} />
-                          </>
-                        ) : null}
-                        <br />
-                        {formatDateTime(marker.meetingAt)}
-                        <br />
-                        <button className="secondary-button small-button" type="button" onClick={() => loadPosts(marker.id)}>
-                          Open posts
-                        </button>
-                      </Popup>
-                    </Marker>
-                  ))}
-                </MapContainer>
-              </div>
-            </div>
-
-            <div className="home-summaries">
-              <div className="panel-soft home-summary-card">
-                <div className="card-topline">
-                  <p className="eyebrow">Places visited</p>
-                  <h4>{markers.length}</h4>
-                </div>
-                <p className="muted-copy">All journal locations appear on the map, with their photo marker if one was uploaded.</p>
-              </div>
-
-              <div className="panel-soft home-summary-card">
-                <div className="card-topline">
-                  <p className="eyebrow">Recent written ones</p>
-                  <h4>{posts.length}</h4>
-                </div>
-                <div className="recent-post-list">
-                  {posts.slice(0, 3).map((post) => (
-                    <button key={post.id} className="recent-post-row" type="button" onClick={() => setActiveSection("posts")}>
-                      <span>{selectedMeeting?.locationName ?? "Recent post"}</span>
-                      <small>{formatDateTime(post.createdAt)}</small>
-                    </button>
-                  ))}
-                  {!posts.length ? <p className="muted-copy">Recent entries will show here once a meeting is selected and posts are loaded.</p> : null}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-      );
-    }
-
     if (activeSection === "meetings") {
       return (
         <section className="screen-panel">
           <div className="section-head">
             <div>
-              <p className="eyebrow">{sectionTitleMap.posts}</p>
-              <h2>Pick a place on the map, then write the memory.</h2>
+              <p className="eyebrow">{sectionTitleMap.meetings}</p>
+              <h2>Map markers for the places that matter.</h2>
+            </div>
+            <div className="section-actions">
+              <button className="secondary-button" type="button" onClick={useCurrentPosition}>
+                <LocationIcon />
+                Use My Location
+              </button>
             </div>
           </div>
 
-          <div className="journal-post-layout">
+          <div className="meetings-layout">
             <aside className="meeting-panel panel-soft">
               <form className="stack-tight" onSubmit={createMeeting}>
                 <label>
@@ -1260,19 +1145,14 @@ export const App = () => {
                   </div>
                 ) : null}
 
-                <button className="secondary-button" type="button" onClick={useCurrentPosition}>
-                  <LocationIcon />
-                  Use my location
-                </button>
-
                 <button className="primary-button" type="submit" disabled={!selectedJournalId}>
                   Seal Meeting Marker
                 </button>
               </form>
             </aside>
 
-            <div className="panel-soft home-map-card">
-              <div className="map-wrap home-map-wrap">
+            <div className="map-panel panel-soft">
+              <div className="map-wrap">
                 <MapContainer center={selectedCenter} zoom={6} scrollWheelZoom style={{ height: "100%" }}>
                   <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -1292,12 +1172,25 @@ export const App = () => {
                         {formatDateTime(marker.meetingAt)}
                         <br />
                         <button className="secondary-button small-button" type="button" onClick={() => loadPosts(marker.id)}>
-                          Open posts
+                          Open meeting posts
                         </button>
                       </Popup>
                     </Marker>
                   ))}
                 </MapContainer>
+              </div>
+
+              <div className="meeting-summary">
+                <div>
+                  <p className="eyebrow">Active marker</p>
+                  <h4>{selectedMeeting?.locationName ?? "No meeting selected"}</h4>
+                </div>
+                <p className="muted-copy">
+                  {selectedMeeting ? `${formatDateTime(selectedMeeting.meetingAt)} · ${selectedMeeting.latitude.toFixed(3)}, ${selectedMeeting.longitude.toFixed(3)}` : "Click a marker to open its post thread."}
+                </p>
+                {selectedMeeting?.photoDataUrl ? (
+                  <img src={selectedMeeting.photoDataUrl} alt={selectedMeeting.locationName} className="meeting-summary-image" />
+                ) : null}
               </div>
             </div>
           </div>
@@ -1311,135 +1204,86 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.posts}</p>
-              <h2>Write a new post with a place attached.</h2>
+              <h2>Write it once, seal it with the journal key.</h2>
+            </div>
+            <div className="section-actions">
+              <span className="lock-badge">
+                <LockIcon />
+                Encrypted with journal key
+              </span>
             </div>
           </div>
 
-          <div className="posts-page-layout">
-            <div className="compose-shell panel-soft">
-              <form className="compose-form" onSubmit={submitPost}>
-                <div className="compose-topline">
-                  <span className="lock-badge">
-                    <LockIcon />
-                    Encrypted with journal key
-                  </span>
-                  <span className="muted-copy">{postText.length} characters</span>
-                </div>
+          <div className="compose-shell panel-soft">
+            <form className="compose-form" onSubmit={submitPost}>
+              <label className="composer-label">
+                <span>Your note</span>
+                <textarea
+                  value={postText}
+                  onChange={(event) => setPostText(event.target.value)}
+                  placeholder="A few lines worth keeping."
+                  rows={8}
+                  className="lined-textarea"
+                />
+              </label>
 
-                <label className="composer-label">
-                  <span>Your note</span>
-                  <textarea
-                    value={postText}
-                    onChange={(event) => setPostText(event.target.value)}
-                    placeholder="What happened, who was there, and what it meant."
-                    rows={8}
-                    className="lined-textarea"
+              <div className="attach-row">
+                <label className="attach-button secondary-button">
+                  <UploadIcon />
+                  Attach media
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,video/*"
+                    onChange={(event) => {
+                      const nextFiles = Array.from(event.target.files ?? []);
+                      if (!nextFiles.length) {
+                        return;
+                      }
+
+                      setFiles((current) => [...current, ...nextFiles]);
+                      event.target.value = "";
+                    }}
                   />
                 </label>
+                <p className="muted-copy">Images and videos stay bundled to the post.</p>
+              </div>
 
-                <div className="attach-row">
-                  <label className="attach-button secondary-button">
-                    <UploadIcon />
-                    Attach media
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*,video/*"
-                      onChange={(event) => {
-                        const nextFiles = Array.from(event.target.files ?? []);
-                        if (!nextFiles.length) {
-                          return;
-                        }
-
-                        setFiles((current) => [...current, ...nextFiles]);
-                        event.target.value = "";
-                      }}
-                    />
-                  </label>
-                  <button className="secondary-button" type="button" onClick={() => setActiveSection("home")}>
-                    Pick location on map
-                  </button>
-                </div>
-
-                {attachmentPreviews.length ? (
-                  <div className="attachment-strip">
-                    {attachmentPreviews.map(({ file, url }, index) => (
-                      <div className="attachment-chip" key={`${file.name}-${file.size}-${index}`}>
-                        <img src={url} alt={file.name} />
-                        <div>
-                          <p>{file.name}</p>
-                          <span>{formatBytes(file.size)}</span>
-                        </div>
-                        <button
-                          className="icon-button"
-                          type="button"
-                          onClick={() => setFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))}
-                        >
-                          ×
-                        </button>
+              {attachmentPreviews.length ? (
+                <div className="attachment-strip">
+                  {attachmentPreviews.map(({ file, url }, index) => (
+                    <div className="attachment-chip" key={`${file.name}-${file.size}-${index}`}>
+                      <img src={url} alt={file.name} />
+                      <div>
+                        <p>{file.name}</p>
+                        <span>{formatBytes(file.size)}</span>
                       </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="compose-footer">
-                  <button className="primary-button seal-button" type="submit" disabled={!selectedJournalId || !selectedMeetingId}>
-                    Seal &amp; Publish
-                  </button>
+                      <button
+                        className="icon-button"
+                        type="button"
+                        onClick={() => setFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              </form>
-            </div>
+              ) : null}
 
-            <aside className="panel-soft posts-side-panel">
-              <div className="post-map-card">
-                <p className="eyebrow">Pick on map</p>
-                <div className="map-wrap post-map-wrap">
-                  <MapContainer center={selectedCenter} zoom={6} scrollWheelZoom style={{ height: "100%" }}>
-                    <TileLayer
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                    />
-                    {markers.map((marker) => (
-                      <Marker key={marker.id} position={[marker.latitude, marker.longitude]} icon={warmPinIcon}>
-                        <Popup>
-                          <strong>{marker.locationName}</strong>
-                          <br />
-                          {formatDateTime(marker.meetingAt)}
-                          <br />
-                          <button className="secondary-button small-button" type="button" onClick={() => pickMeetingForPost(marker.id)}>
-                            Use this location
-                          </button>
-                        </Popup>
-                      </Marker>
-                    ))}
-                  </MapContainer>
-                </div>
+              <div className="compose-footer">
+                <span className="muted-copy">{postText.length} characters</span>
+                <button className="primary-button seal-button" type="submit" disabled={!selectedMeetingId}>
+                  Seal &amp; Publish
+                </button>
               </div>
+            </form>
+          </div>
 
-              <div className="stack-tight">
-                <p className="eyebrow">Recent written ones</p>
-                <h4>{selectedMeeting ? selectedMeeting.locationName : "Pick a meeting first"}</h4>
-                <p className="muted-copy">Recent drafts and published posts live here.</p>
-              </div>
-
-              <div className="recent-post-list">
-                {posts.length ? (
-                  posts.slice(0, 4).map((post) => (
-                    <article key={post.id} className="recent-post-card">
-                      <div className="row-between">
-                        <strong>{selectedMeeting?.locationName ?? "Meeting post"}</strong>
-                        <span className="status-pill">{formatDateTime(post.createdAt)}</span>
-                      </div>
-                      <p className={`feed-copy ${decryptedPosts[post.id] ? "is-revealed" : "is-locked"}`}>
-                        {decryptedPosts[post.id] ?? "Encrypted memory waiting behind the glass."}
-                      </p>
-                    </article>
-                  ))
-                ) : (
-                  <p className="muted-copy">Open a marker from Home to load recent posts here.</p>
-                )}
-              </div>
-            </aside>
+          <div className="meeting-hint panel-soft">
+            <p className="eyebrow">Current thread</p>
+            <h4>{selectedMeeting ? selectedMeeting.locationName : "Pick a meeting marker first"}</h4>
+            <p className="muted-copy">{selectedMeeting ? formatDateTime(selectedMeeting.meetingAt) : "Posts publish into the selected meeting."}</p>
+            <p className="mono-chip">{selectedMeetingId || "No meeting selected"}</p>
           </div>
         </section>
       );
@@ -1459,29 +1303,18 @@ export const App = () => {
             </button>
           </div>
 
-          {!selectedJournalId ? (
+          {!selectedMeetingId ? (
             <div className="empty-state">
               <MapIcon />
-              <p>Select a journal to see released posts.</p>
+              <p>Pick a meeting marker from Meetings to load posts.</p>
               <button className="secondary-button" type="button" onClick={() => setActiveSection("meetings")}>
-                Go to Posts
+                Go to Meetings
               </button>
             </div>
           ) : null}
 
           <div className="feed-column">
-            {releasedPosts.length ? (
-              releasedPosts.map((post) => (
-                <article key={post.id} className="feed-card">
-                  <div className="feed-date">{formatDate(post.createdAt)}</div>
-                  <h3>{post.about}</h3>
-                  <p className="muted-copy">
-                    {post.authorName} · {formatDateTime(post.meetingAt)}
-                  </p>
-                  <p className="feed-copy is-revealed">Released by the system and now visible to the journal.</p>
-                </article>
-              ))
-            ) : loadingPosts ? (
+            {loadingPosts ? (
               <>
                 <div className="skeleton feed-skeleton" />
                 <div className="skeleton feed-skeleton" />
@@ -1519,7 +1352,7 @@ export const App = () => {
             ) : (
               <div className="empty-state">
                 <LockIcon />
-                <p>No released posts yet. Publish a memory and wait for it to unlock.</p>
+                <p>No posts loaded yet. Click a meeting marker to bring one in.</p>
               </div>
             )}
           </div>
