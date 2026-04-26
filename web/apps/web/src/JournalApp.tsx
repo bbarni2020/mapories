@@ -1,6 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { divIcon } from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from "react-leaflet";
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import * as exifr from "exifr";
 import { api, setAuthToken, setCsrfToken } from "./api";
@@ -92,6 +91,18 @@ type SectionKey = "journals" | "journalHome" | "meetings" | "posts" | "visible" 
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 const DEFAULT_CENTER: [number, number] = [47.4979, 19.0402];
+const AUTH_WORLD_CENTER: [number, number] = [20, 0];
+
+const AUTH_DUMMY_MARKERS: Array<{ id: string; title: string; locationName: string; position: [number, number] }> = [
+  { id: "tokyo", title: "Midnight Ramen", locationName: "Tokyo", position: [35.6764, 139.65] },
+  { id: "nyc", title: "Rainy Rooftop", locationName: "New York", position: [40.7128, -74.006] },
+  { id: "paris", title: "Bridge Walk", locationName: "Paris", position: [48.8566, 2.3522] },
+  { id: "sydney", title: "Harbor Sunrise", locationName: "Sydney", position: [-33.8688, 151.2093] },
+  { id: "cape", title: "Ocean Turn", locationName: "Cape Town", position: [-33.9249, 18.4241] },
+  { id: "rio", title: "Hillside Note", locationName: "Rio", position: [-22.9068, -43.1729] },
+  { id: "reykjavik", title: "Cold Morning", locationName: "Reykjavik", position: [64.1466, -21.9426] },
+  { id: "singapore", title: "Night Market", locationName: "Singapore", position: [1.3521, 103.8198] },
+];
 
 const warmPinIcon = divIcon({
   className: "warm-pin-icon",
@@ -344,9 +355,6 @@ export const App = () => {
   const [postText, setPostText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentPreviews, setAttachmentPreviews] = useState<AttachmentPreview[]>([]);
-  const [postMeetingTitle, setPostMeetingTitle] = useState("");
-  const [postMeetingDate, setPostMeetingDate] = useState(toDatetimeLocalValue(new Date()));
-  const [postLocationName, setPostLocationName] = useState("");
   const [postLatitude, setPostLatitude] = useState("47.4979");
   const [postLongitude, setPostLongitude] = useState("19.0402");
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
@@ -536,7 +544,7 @@ export const App = () => {
     }
 
     refreshMarkers(selectedJournalId).catch(() => setError("Could not load map markers"));
-    refreshVisibleJournalPosts(selectedJournalId).catch(() => setError("Could not load visible posts"));
+    refreshVisibleJournalPosts(selectedJournalId).catch(() => setError("Could not load journal timeline"));
   }, [selectedJournalId]);
 
   useEffect(() => {
@@ -603,6 +611,41 @@ export const App = () => {
     setPostDraftMeetingId(selectedMeetingId);
   }, [selectedMeetingId]);
 
+  useEffect(() => {
+    if (!postDraftMeetingId) {
+      return;
+    }
+
+    const meeting = markers.find((item) => item.id === postDraftMeetingId);
+    if (!meeting) {
+      return;
+    }
+
+    setPostLatitude(meeting.latitude.toFixed(6));
+    setPostLongitude(meeting.longitude.toFixed(6));
+  }, [markers, postDraftMeetingId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCapsuleNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (activeSection !== "visible" || !visibleJournalPosts.length) {
+      return;
+    }
+
+    decryptVisibleJournalPosts().catch(() => setError("Could not unlock the timeline"));
+  }, [activeSection, capsuleNow, visibleJournalPosts, selectedJournalId]);
+
+  useEffect(() => {
+    if (activeSection !== "posts" || !posts.length) {
+      return;
+    }
+
+    decryptLoadedPosts().catch(() => setError("Could not unlock post thread"));
+  }, [activeSection, posts, selectedJournalId]);
+
   const selectedJournal = useMemo(
     () => journals.find((journal) => journal.id === selectedJournalId) ?? null,
     [journals, selectedJournalId],
@@ -629,11 +672,56 @@ export const App = () => {
   const currentJournalSecret = selectedJournalId ? journalSecrets[selectedJournalId] ?? "" : "";
   const visibleInviteEntries = selectedJournalId ? inviteEntriesByJournal[selectedJournalId] ?? [] : [];
 
+  const clearJournalView = () => {
+    setSelectedJournalId("");
+    setActiveSection("journals");
+    setSelectedMeetingId("");
+    setPostDraftMeetingId("");
+    setMeetingEditorId("");
+    setMarkers([]);
+    setPosts([]);
+    setDecryptedPosts({});
+    setVisibleJournalPosts([]);
+    setDecryptedVisiblePosts({});
+  };
+
   const loadPosts = async (meetingId: string) => {
     setSelectedMeetingId(meetingId);
     setPostDraftMeetingId(meetingId);
     await refreshPosts(meetingId);
-    setActiveSection("visible");
+    setActiveSection("posts");
+  };
+
+  const openMeetingForEdit = (meetingId: string) => {
+    const meeting = markers.find((item) => item.id === meetingId);
+    if (!meeting) {
+      return;
+    }
+
+    setMeetingEditorId(meeting.id);
+    setMeetingTitle(meeting.title ?? "");
+    setMeetingDate(toDatetimeLocalValue(new Date(meeting.meetingAt)));
+    setLocationName(meeting.locationName ?? "");
+    setLatitude(meeting.latitude.toFixed(6));
+    setLongitude(meeting.longitude.toFixed(6));
+    setMeetingPhotoDataUrl(meeting.photoDataUrl ?? null);
+    setMeetingPreview(
+      meeting.photoDataUrl
+        ? { url: meeting.photoDataUrl, name: meeting.locationName, locationFound: true }
+        : null,
+    );
+    setSelectedMeetingId(meetingId);
+  };
+
+  const resetMeetingForm = () => {
+    setMeetingEditorId("");
+    setMeetingTitle("");
+    setMeetingDate(toDatetimeLocalValue(new Date()));
+    setLocationName("");
+    setLatitude("47.4979");
+    setLongitude("19.0402");
+    setMeetingPhotoDataUrl(null);
+    setMeetingPreview(null);
   };
 
   const ensureJournalSecret = async (journalId: string): Promise<string> => {
@@ -747,13 +835,15 @@ export const App = () => {
     await refreshJournals(selectedJournalId);
   };
 
-  const createMeeting = async (event: FormEvent) => {
+  const saveMeeting = async (event: FormEvent) => {
     event.preventDefault();
     if (!selectedJournalId) {
       return;
     }
 
-    await api.post(`/journals/${selectedJournalId}/meetings`, {
+    const wasEditing = Boolean(meetingEditorId);
+
+    const payload = {
       title: meetingTitle,
       meetingAt: new Date(meetingDate).toISOString(),
       timezoneIana: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -762,14 +852,21 @@ export const App = () => {
       photoDataUrl: meetingPhotoDataUrl ?? undefined,
       latitude: Number(latitude),
       longitude: Number(longitude),
-    });
+    };
+
+    const response = meetingEditorId
+      ? await api.patch<MeetingMarker>(`/journals/${selectedJournalId}/meetings/${meetingEditorId}`, payload)
+      : await api.post<MeetingMarker>(`/journals/${selectedJournalId}/meetings`, payload);
+
+    setMeetingEditorId(response.data.id);
 
     await refreshMarkers(selectedJournalId);
-    setMeetingTitle("");
-    setMeetingDate(toDatetimeLocalValue(new Date()));
-    setLocationName("");
-    setMeetingPhotoDataUrl(null);
-    setMeetingPreview(null);
+    setSelectedMeetingId(response.data.id);
+    if (wasEditing) {
+      setMeetingEditorId(response.data.id);
+    } else {
+      resetMeetingForm();
+    }
   };
 
   const importMeetingMetadata = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -861,25 +958,8 @@ export const App = () => {
 
     let workingMeetingId = postDraftMeetingId || selectedMeetingId;
     if (!workingMeetingId) {
-      if (!postMeetingTitle.trim() || !postLocationName.trim() || !postMeetingDate) {
-        setError("Set meeting title, date and location for this post");
-        return;
-      }
-
-      const meetingResponse = await api.post<MeetingMarker>(`/journals/${selectedJournalId}/meetings`, {
-        title: postMeetingTitle.trim(),
-        meetingAt: new Date(postMeetingDate).toISOString(),
-        timezoneIana: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        timezoneOffsetMinutes: -new Date(postMeetingDate).getTimezoneOffset(),
-        locationName: postLocationName.trim(),
-        latitude: Number(postLatitude),
-        longitude: Number(postLongitude),
-      });
-
-      workingMeetingId = meetingResponse.data.id;
-      setSelectedMeetingId(workingMeetingId);
-      setPostDraftMeetingId(workingMeetingId);
-      await refreshMarkers(selectedJournalId);
+      setError("Pick a meeting first");
+      return;
     }
 
     const journalSecret = currentJournalSecret || (await ensureJournalSecret(selectedJournalId));
@@ -907,9 +987,6 @@ export const App = () => {
 
     setPostText("");
     setFiles([]);
-    setPostMeetingTitle("");
-    setPostLocationName("");
-    setPostMeetingDate(toDatetimeLocalValue(new Date()));
     await refreshPosts(workingMeetingId);
     await refreshVisibleJournalPosts(selectedJournalId);
   };
@@ -942,6 +1019,10 @@ export const App = () => {
     const next: Record<string, string> = {};
 
     for (const post of visibleJournalPosts) {
+      if (post.visibleAfter > new Date().toISOString()) {
+        continue;
+      }
+
       try {
         next[post.id] = await decryptText(post.ciphertextBase64, post.ivBase64, journalSecret, selectedJournalId);
       } catch {
@@ -1212,19 +1293,30 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.meetings}</p>
-              <h2>Map markers for the places that matter.</h2>
+              <h2>Meetings keep the thread, and old ones stay editable.</h2>
             </div>
             <div className="section-actions">
               <button className="secondary-button" type="button" onClick={useCurrentPosition}>
                 <LocationIcon />
                 Use My Location
               </button>
+              <button className="secondary-button" type="button" onClick={resetMeetingForm}>
+                <PlusIcon />
+                New meeting
+              </button>
             </div>
           </div>
 
           <div className="meetings-layout">
             <aside className="meeting-panel panel-soft">
-              <form className="stack-tight" onSubmit={createMeeting}>
+              <form className="stack-tight" onSubmit={saveMeeting}>
+                <div className="row-between">
+                  <div>
+                    <p className="eyebrow">{meetingEditorId ? "Editing meeting" : "Create meeting"}</p>
+                    <h4>{meetingEditorId ? "Adjust the old marker" : "Pin a fresh one"}</h4>
+                  </div>
+                  {meetingEditorId ? <span className="status-pill">{meetingEditorId.slice(0, 6)}</span> : null}
+                </div>
                 <label>
                   <span>Title</span>
                   <input value={meetingTitle} onChange={(event) => setMeetingTitle(event.target.value)} placeholder="Coffee under the bridge" />
@@ -1269,9 +1361,33 @@ export const App = () => {
                 ) : null}
 
                 <button className="primary-button" type="submit" disabled={!selectedJournalId}>
-                  Seal Meeting Marker
+                  {meetingEditorId ? "Update Meeting" : "Seal Meeting Marker"}
                 </button>
               </form>
+
+              <div className="meeting-list">
+                <p className="eyebrow">Recent meetings</p>
+                {markers.length ? (
+                  markers.map((meeting) => (
+                    <article key={meeting.id} className={`recent-meeting-card ${meeting.id === meetingEditorId ? "is-active" : ""}`}>
+                      <div>
+                        <p>{meeting.locationName}</p>
+                        <span>{formatDateTime(meeting.meetingAt)}</span>
+                      </div>
+                      <div className="pill-row">
+                        <button className="secondary-button small-button" type="button" onClick={() => openMeetingForEdit(meeting.id)}>
+                          Edit
+                        </button>
+                        <button className="secondary-button small-button" type="button" onClick={() => loadPosts(meeting.id)}>
+                          Open posts
+                        </button>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="muted-copy">No meetings yet. Create the first one above.</p>
+                )}
+              </div>
             </aside>
 
             <div className="map-panel panel-soft">
@@ -1294,9 +1410,14 @@ export const App = () => {
                         <br />
                         {formatDateTime(marker.meetingAt)}
                         <br />
-                        <button className="secondary-button small-button" type="button" onClick={() => loadPosts(marker.id)}>
-                          Open meeting posts
-                        </button>
+                        <div className="pill-row">
+                          <button className="secondary-button small-button" type="button" onClick={() => openMeetingForEdit(marker.id)}>
+                            Edit meeting
+                          </button>
+                          <button className="secondary-button small-button" type="button" onClick={() => loadPosts(marker.id)}>
+                            Open meeting posts
+                          </button>
+                        </div>
                       </Popup>
                     </Marker>
                   ))}
@@ -1370,8 +1491,8 @@ export const App = () => {
                 <strong>{markers.length}</strong>
               </div>
               <div className="stat-card">
-                <span>Released posts</span>
-                <strong>{visibleJournalPosts.length}</strong>
+                <span>Opened posts</span>
+                <strong>{visibleJournalPosts.filter((post) => post.isVisible).length}</strong>
               </div>
               <div className="stat-card">
                 <span>Selected meeting</span>
@@ -1389,12 +1510,12 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.posts}</p>
-              <h2>Write it once, seal it with the journal key.</h2>
+              <h2>Write to a meeting. No detours, no editing the event from here.</h2>
             </div>
             <div className="section-actions">
               <span className="lock-badge">
                 <LockIcon />
-                Encrypted with journal key
+                Meeting posts stay encrypted with the journal key
               </span>
             </div>
           </div>
@@ -1402,16 +1523,15 @@ export const App = () => {
           <div className="post-map-layout">
             <div className="map-panel panel-soft">
               <div className="map-wrap post-map-wrap">
-                <MapContainer center={[Number(postLatitude), Number(postLongitude)]} zoom={7} scrollWheelZoom style={{ height: "100%" }}>
+                <MapContainer
+                  center={selectedDraftMeeting ? [selectedDraftMeeting.latitude, selectedDraftMeeting.longitude] : [Number(postLatitude), Number(postLongitude)]}
+                  zoom={selectedDraftMeeting ? 12 : 7}
+                  scrollWheelZoom
+                  style={{ height: "100%" }}
+                >
                   <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                     url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                  />
-                  <MapClickPicker
-                    onPick={(lat, lng) => {
-                      setPostLatitude(lat.toFixed(6));
-                      setPostLongitude(lng.toFixed(6));
-                    }}
                   />
                   {markers.map((marker) => (
                     <Marker key={marker.id} position={[marker.latitude, marker.longitude]} icon={warmPinIcon}>
@@ -1420,23 +1540,26 @@ export const App = () => {
                         <br />
                         {formatDateTime(marker.meetingAt)}
                         <br />
-                        <button
-                          className="secondary-button small-button"
-                          type="button"
-                          onClick={() => {
-                            setPostDraftMeetingId(marker.id);
-                            setSelectedMeetingId(marker.id);
-                            refreshPosts(marker.id).catch(() => setError("Could not load recent posts"));
-                          }}
-                        >
-                          Use this meeting
-                        </button>
+                        {marker.photoDataUrl ? <img src={marker.photoDataUrl} alt={marker.locationName} className="meeting-summary-image" /> : null}
+                        <div className="pill-row">
+                          <button
+                            className="secondary-button small-button"
+                            type="button"
+                            onClick={() => {
+                              setPostDraftMeetingId(marker.id);
+                              setSelectedMeetingId(marker.id);
+                              refreshPosts(marker.id).catch(() => setError("Could not load recent posts"));
+                            }}
+                          >
+                            Select meeting
+                          </button>
+                          <button className="secondary-button small-button" type="button" onClick={() => loadPosts(marker.id)}>
+                            Open posts
+                          </button>
+                        </div>
                       </Popup>
                     </Marker>
                   ))}
-                  {!postDraftMeetingId ? (
-                    <Marker position={[Number(postLatitude), Number(postLongitude)]} icon={warmPinIcon} />
-                  ) : null}
                 </MapContainer>
               </div>
             </div>
@@ -1455,7 +1578,7 @@ export const App = () => {
                     }
                   }}
                 >
-                  <option value="">Create from map/date below</option>
+                  <option value="">Choose an existing meeting</option>
                   {markers.map((marker) => (
                     <option key={marker.id} value={marker.id}>
                       {marker.locationName} · {formatDate(marker.meetingAt)}
@@ -1464,35 +1587,20 @@ export const App = () => {
                 </select>
               </label>
 
-              {!postDraftMeetingId ? (
-                <>
-                  <label>
-                    <span>Meeting title</span>
-                    <input value={postMeetingTitle} onChange={(event) => setPostMeetingTitle(event.target.value)} placeholder="Sunset walk" />
-                  </label>
-                  <label>
-                    <span>Date</span>
-                    <input type="datetime-local" value={postMeetingDate} onChange={(event) => setPostMeetingDate(event.target.value)} />
-                  </label>
-                  <label>
-                    <span>Location name</span>
-                    <input value={postLocationName} onChange={(event) => setPostLocationName(event.target.value)} placeholder="Margaret Island" />
-                  </label>
-                </>
+              {selectedDraftMeeting ? (
+                <div className="meeting-summary stack-tight">
+                  <div>
+                    <p className="eyebrow">Selected meeting</p>
+                    <h4>{selectedDraftMeeting.locationName}</h4>
+                  </div>
+                  <p className="muted-copy">{formatDateTime(selectedDraftMeeting.meetingAt)} · {selectedDraftMeeting.latitude.toFixed(3)}, {selectedDraftMeeting.longitude.toFixed(3)}</p>
+                  {selectedDraftMeeting.photoDataUrl ? (
+                    <img src={selectedDraftMeeting.photoDataUrl} alt={selectedDraftMeeting.locationName} className="meeting-summary-image" />
+                  ) : null}
+                </div>
               ) : (
-                <p className="muted-copy">Posting into selected meeting: {selectedDraftMeeting?.locationName ?? "Meeting"}</p>
+                <p className="muted-copy">Pick a meeting from the map or dropdown before sealing the post.</p>
               )}
-
-              <div className="grid-two-up">
-                <label>
-                  <span>Lat</span>
-                  <input value={postLatitude} onChange={(event) => setPostLatitude(event.target.value)} />
-                </label>
-                <label>
-                  <span>Lng</span>
-                  <input value={postLongitude} onChange={(event) => setPostLongitude(event.target.value)} />
-                </label>
-              </div>
             </div>
           </div>
 
@@ -1587,16 +1695,9 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.visible}</p>
-              <h2>The read-only journal stream.</h2>
+              <h2>Time Capsule</h2>
+              <p className="muted-copy">Entries open themselves when the clock runs out.</p>
             </div>
-            <button className="secondary-button" type="button" onClick={decryptLoadedPosts} disabled={!posts.length}>
-              <LockIcon />
-              Decrypt loaded posts
-            </button>
-            <button className="secondary-button" type="button" onClick={decryptVisibleJournalPosts} disabled={!visibleJournalPosts.length}>
-              <LockIcon />
-              Decrypt released feed
-            </button>
           </div>
 
           <div className="feed-column">
@@ -1607,37 +1708,45 @@ export const App = () => {
                 <div className="skeleton feed-skeleton" />
               </>
             ) : visibleJournalPosts.length ? (
-              visibleJournalPosts.map((post) => (
-                <article key={post.id} className="feed-card">
-                  <div className="feed-date">{formatDate(post.createdAt)}</div>
-                  <h3>{post.meeting.title}</h3>
-                  <p className="muted-copy">
-                    By {post.authorName} · {formatDateTime(post.meeting.meetingAt)} · {post.meeting.locationName}
-                  </p>
-                  <p className={`feed-copy ${decryptedVisiblePosts[post.id] ? "is-revealed" : "is-locked"}`}>
-                    {decryptedVisiblePosts[post.id] ?? "Encrypted memory waiting behind the glass."}
-                  </p>
+              visibleJournalPosts.map((post) => {
+                const countdown = getCountdown(post.visibleAfter, capsuleNow);
+                const revealed = countdown.done;
 
-                  <div className="feed-actions">
-                    <button className="secondary-button small-button" type="button" onClick={decryptVisibleJournalPosts}>
-                      <LockIcon />
-                      Decrypt
-                    </button>
-                    <span className="muted-copy">Visible after {formatDateTime(post.visibleAfter)}</span>
-                  </div>
-
-                  {post.media.length ? (
-                    <div className="media-grid">
-                      {post.media.map((media) => (
-                        <button key={media.id} className="media-thumb" type="button" onClick={() => openDecryptedMedia(media)}>
-                          <span>{media.mimeType.startsWith("video/") ? "Video" : "Photo"}</span>
-                          <small>{formatBytes(media.sizeBytes)}</small>
-                        </button>
-                      ))}
+                return (
+                  <article key={post.id} className={`feed-card ${revealed ? "is-released" : "is-locked"}`}>
+                    <div className="feed-date">{formatDate(post.createdAt)}</div>
+                    <h3>{post.meeting.title}</h3>
+                    <p className="muted-copy">
+                      By {post.authorName} · {formatDateTime(post.meeting.meetingAt)} · {post.meeting.locationName}
+                    </p>
+                    <div className="feed-meta-row">
+                      <span className={`status-pill ${revealed ? "is-positive" : "is-muted"}`}>
+                        {revealed ? "Opened" : "Sealed"}
+                      </span>
+                      <div className="capsule-countdown">
+                        <strong className="countdown-clock">
+                          {pad2(countdown.days)}:{pad2(countdown.hours)}:{pad2(countdown.minutes)}:{pad2(countdown.seconds)}
+                        </strong>
+                        <small className="muted-copy">days : hours : min : sec</small>
+                      </div>
                     </div>
-                  ) : null}
-                </article>
-              ))
+                    <p className={`feed-copy ${decryptedVisiblePosts[post.id] ? "is-revealed" : "is-locked"}`}>
+                      {decryptedVisiblePosts[post.id] ?? "Waiting for the capsule to open."}
+                    </p>
+
+                    {post.media.length ? (
+                      <div className="media-grid">
+                        {post.media.map((media) => (
+                          <button key={media.id} className="media-thumb" type="button" onClick={() => openDecryptedMedia(media)}>
+                            <span>{media.mimeType.startsWith("video/") ? "Video" : "Photo"}</span>
+                            <small>{formatBytes(media.sizeBytes)}</small>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })
             ) : (
               <div className="empty-state">
                 <LockIcon />
@@ -1811,6 +1920,7 @@ export const App = () => {
     adminQuery,
     adminUsers,
     attachmentPreviews,
+    capsuleNow,
     files,
     grantDays,
     grantPlanId,
@@ -1826,6 +1936,7 @@ export const App = () => {
     loadingPosts,
     locationName,
     lightbox,
+    meetingEditorId,
     markers,
     meetingDate,
     meetingPreview,
@@ -1835,10 +1946,19 @@ export const App = () => {
     newPlanStorageGiB,
     newPlanTier,
     password,
+    postDraftMeetingId,
+    postLatitude,
+    postLongitude,
     postText,
+    decryptedVisiblePosts,
     posts,
     renameJournalName,
+    loadPosts,
+    openMeetingForEdit,
+    resetMeetingForm,
+    saveMeeting,
     selectedCenter,
+    selectedDraftMeeting,
     selectedJournal,
     selectedJournalId,
     selectedMeeting,
@@ -1849,60 +1969,77 @@ export const App = () => {
   if (!token || !user) {
     return (
       <main className="auth-shell">
-        <section className="auth-card panel-soft auth-card-topography">
-          <div className="brand-lockup">
-            <div className="wordmark">
-              <BookIcon />
-              <div>
-                <p>Mapories</p>
-                <span>private journals, shared quietly</span>
-              </div>
+        <section className="auth-card panel-soft auth-card-topography auth-layout">
+          <div className="auth-hero">
+            <div className="auth-hero-map-wrap">
+              <MapContainer center={AUTH_WORLD_CENTER} zoom={2} scrollWheelZoom={false} style={{ height: "100%" }}>
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                />
+                {AUTH_DUMMY_MARKERS.map((marker) => (
+                  <Marker key={marker.id} position={marker.position} icon={warmPinIcon}>
+                    <Popup>
+                      <strong>{marker.title}</strong>
+                      <br />
+                      {marker.locationName}
+                      <br />
+                      Demo meeting
+                    </Popup>
+                  </Marker>
+                ))}
+              </MapContainer>
             </div>
-            <p className="muted-copy">A warm journal for a small circle. Everything stays sealed until the right key opens it.</p>
           </div>
 
-          <div className="auth-tabs">
-            <button className={`auth-tab ${authMode === "signIn" ? "is-active" : ""}`} type="button" onClick={() => setAuthMode("signIn")}>Sign In</button>
-            <button className={`auth-tab ${authMode === "register" ? "is-active" : ""}`} type="button" onClick={() => setAuthMode("register")}>Register</button>
-          </div>
+          <div className="auth-panel">
+            <div className="auth-panel-brand">
+              <p>Mapories</p>
+              <span className="muted-copy">Login</span>
+            </div>
+            <div className="auth-tabs">
+              <button className={`auth-tab ${authMode === "signIn" ? "is-active" : ""}`} type="button" onClick={() => setAuthMode("signIn")}>Sign In</button>
+              <button className={`auth-tab ${authMode === "register" ? "is-active" : ""}`} type="button" onClick={() => setAuthMode("register")}>Register</button>
+            </div>
 
-          <form className="stack-tight" onSubmit={authMode === "signIn" ? handleLogin : handleRegister}>
-            {authMode === "register" ? (
+            <form className="stack-tight" onSubmit={authMode === "signIn" ? handleLogin : handleRegister}>
+              {authMode === "register" ? (
+                <label>
+                  <span>Name</span>
+                  <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" />
+                </label>
+              ) : null}
               <label>
-                <span>Name</span>
-                <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" />
+                <span>Email</span>
+                <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" />
               </label>
-            ) : null}
-            <label>
-              <span>Email</span>
-              <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" />
-            </label>
-            <label>
-              <span>Password</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Minimum 12 characters"
-              />
-            </label>
-            <button className="primary-button auth-submit" type="submit">
-              Open Your Journal
-            </button>
-          </form>
-
-          <div className="google-card">
-            <span className="eyebrow">Google one-click</span>
-            <div ref={googleButtonRef} className="google-button-slot" />
-            {!GOOGLE_CLIENT_ID ? (
-              <button className="secondary-button google-fallback" type="button" disabled>
-                <GoogleIcon />
-                Continue with Google
+              <label>
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Minimum 12 characters"
+                />
+              </label>
+              <button className="primary-button auth-submit" type="submit">
+                Open Your Journal
               </button>
-            ) : null}
-          </div>
+            </form>
 
-          {error ? <p className="toast-note">{error}</p> : null}
+            <div className="google-card">
+              <span className="eyebrow">Google one-click</span>
+              <div ref={googleButtonRef} className="google-button-slot" />
+              {!GOOGLE_CLIENT_ID ? (
+                <button className="secondary-button google-fallback" type="button" disabled>
+                  <GoogleIcon />
+                  Continue with Google
+                </button>
+              ) : null}
+            </div>
+
+            {error ? <p className="toast-note">{error}</p> : null}
+          </div>
         </section>
       </main>
     );
@@ -1910,7 +2047,7 @@ export const App = () => {
 
   const navItemsBase = user.role === "ADMIN" ? sectionConfig : tabItems;
   const navItems = selectedJournalId
-    ? navItemsBase
+    ? navItemsBase.filter((item) => item.key !== "journals")
     : navItemsBase.filter((item) => item.key === "journals" || (user.role === "ADMIN" && item.key === "admin"));
 
   return (
@@ -1925,6 +2062,11 @@ export const App = () => {
             </div>
           </div>
         </div>
+        {selectedJournalId ? (
+          <button className="secondary-button small-button" type="button" onClick={clearJournalView}>
+            Back to journals
+          </button>
+        ) : null}
         <div className="user-cluster">
           <div className="avatar-chip">{initials(user.name)}</div>
           <div>
