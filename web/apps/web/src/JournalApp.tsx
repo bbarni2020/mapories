@@ -102,6 +102,39 @@ const AUTH_DUMMY_MARKERS: Array<{ id: string; title: string; locationName: strin
   { id: "rio", title: "Hillside Note", locationName: "Rio", position: [-22.9068, -43.1729] },
   { id: "reykjavik", title: "Cold Morning", locationName: "Reykjavik", position: [64.1466, -21.9426] },
   { id: "singapore", title: "Night Market", locationName: "Singapore", position: [1.3521, 103.8198] },
+
+  { id: "london", title: "Foggy Crossing", locationName: "London", position: [51.5074, -0.1278] },
+  { id: "berlin", title: "Late Café", locationName: "Berlin", position: [52.52, 13.405] },
+  { id: "rome", title: "Golden Alley", locationName: "Rome", position: [41.9028, 12.4964] },
+  { id: "barcelona", title: "Street Guitar", locationName: "Barcelona", position: [41.3851, 2.1734] },
+  { id: "amsterdam", title: "Canal Drift", locationName: "Amsterdam", position: [52.3676, 4.9041] },
+
+  { id: "moscow", title: "Snow Echo", locationName: "Moscow", position: [55.7558, 37.6173] },
+  { id: "dubai", title: "Glass Skyline", locationName: "Dubai", position: [25.2048, 55.2708] },
+  { id: "mumbai", title: "Monsoon Rush", locationName: "Mumbai", position: [19.076, 72.8777] },
+  { id: "bangkok", title: "Street Spice", locationName: "Bangkok", position: [13.7563, 100.5018] },
+  { id: "seoul", title: "Neon Steps", locationName: "Seoul", position: [37.5665, 126.978] },
+
+  { id: "beijing", title: "Morning Bicycle", locationName: "Beijing", position: [39.9042, 116.4074] },
+  { id: "shanghai", title: "River Lights", locationName: "Shanghai", position: [31.2304, 121.4737] },
+  { id: "hongkong", title: "Skyline Ferry", locationName: "Hong Kong", position: [22.3193, 114.1694] },
+
+  { id: "la", title: "Sunset Drive", locationName: "Los Angeles", position: [34.0522, -118.2437] },
+  { id: "chicago", title: "Windy Walk", locationName: "Chicago", position: [41.8781, -87.6298] },
+  { id: "toronto", title: "Lake Breeze", locationName: "Toronto", position: [43.6532, -79.3832] },
+  { id: "mexico", title: "Market Colors", locationName: "Mexico City", position: [19.4326, -99.1332] },
+
+  { id: "buenosaires", title: "Tango Corner", locationName: "Buenos Aires", position: [-34.6037, -58.3816] },
+  { id: "lima", title: "Cliffside View", locationName: "Lima", position: [-12.0464, -77.0428] },
+  { id: "santiago", title: "Andes Glow", locationName: "Santiago", position: [-33.4489, -70.6693] },
+
+  { id: "nairobi", title: "Savanna Edge", locationName: "Nairobi", position: [-1.2921, 36.8219] },
+  { id: "lagos", title: "City Pulse", locationName: "Lagos", position: [6.5244, 3.3792] },
+  { id: "cairo", title: "Desert Breeze", locationName: "Cairo", position: [30.0444, 31.2357] },
+
+  { id: "helsinki", title: "Quiet Harbor", locationName: "Helsinki", position: [60.1699, 24.9384] },
+  { id: "stockholm", title: "Island Light", locationName: "Stockholm", position: [59.3293, 18.0686] },
+  { id: "oslo", title: "Fjord Silence", locationName: "Oslo", position: [59.9139, 10.7522] },
 ];
 
 const warmPinIcon = divIcon({
