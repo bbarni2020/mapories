@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import * as exifr from "exifr";
 import { api, setAuthToken, setCsrfToken } from "./api";
 import { decryptBytes, decryptText, encryptBytes, encryptText } from "./crypto";
@@ -130,6 +131,35 @@ const formatDate = (value: string): string =>
 const formatDateTime = (value: string): string =>
   new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
+const getCountdown = (targetIso: string, nowMs: number) => {
+  const remainingMs = new Date(targetIso).getTime() - nowMs;
+  if (remainingMs <= 0) {
+    return {
+      done: true,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+    };
+  }
+
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return {
+    done: false,
+    days,
+    hours,
+    minutes,
+    seconds,
+  };
+};
+
+const pad2 = (value: number): string => String(value).padStart(2, "0");
+
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -253,22 +283,12 @@ const GoogleIcon = () => (
   </span>
 );
 
-const MapClickPicker = ({ onPick }: { onPick: (lat: number, lng: number) => void }) => {
-  useMapEvents({
-    click: (event) => {
-      onPick(event.latlng.lat, event.latlng.lng);
-    },
-  });
-
-  return null;
-};
-
 const sectionConfig: Array<{ key: SectionKey; label: string; icon: () => JSX.Element }> = [
   { key: "journals", label: "Manage Journals", icon: BookIcon },
   { key: "journalHome", label: "Journal Home", icon: MapIcon },
   { key: "meetings", label: "Meetings", icon: MapIcon },
   { key: "posts", label: "Posts", icon: PostIcon },
-  { key: "visible", label: "Visible Posts", icon: VisibleIcon },
+  { key: "visible", label: "Time Capsule", icon: VisibleIcon },
   { key: "admin", label: "Admin", icon: ShieldIcon },
 ];
 
@@ -279,7 +299,7 @@ const sectionTitleMap: Record<SectionKey, string> = {
   journalHome: "Journal home",
   meetings: "Meetings",
   posts: "Posts",
-  visible: "Visible posts",
+  visible: "Time Capsule",
   admin: "Admin platform",
 };
 
@@ -307,6 +327,7 @@ export const App = () => {
   const [markers, setMarkers] = useState<MeetingMarker[]>([]);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string>("");
   const [postDraftMeetingId, setPostDraftMeetingId] = useState<string>("");
+  const [meetingEditorId, setMeetingEditorId] = useState<string>("");
   const [meetingTitle, setMeetingTitle] = useState("");
   const [meetingDate, setMeetingDate] = useState(toDatetimeLocalValue(new Date()));
   const [locationName, setLocationName] = useState("");
@@ -319,6 +340,7 @@ export const App = () => {
   const [decryptedPosts, setDecryptedPosts] = useState<Record<string, string>>({});
   const [visibleJournalPosts, setVisibleJournalPosts] = useState<VisibleJournalPost[]>([]);
   const [decryptedVisiblePosts, setDecryptedVisiblePosts] = useState<Record<string, string>>({});
+  const [capsuleNow, setCapsuleNow] = useState(() => Date.now());
   const [postText, setPostText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentPreviews, setAttachmentPreviews] = useState<AttachmentPreview[]>([]);
@@ -446,7 +468,7 @@ export const App = () => {
 
     setLoadingVisibleJournalPosts(true);
     try {
-      const response = await api.get<VisibleJournalPost[]>(`/journals/${journalId}/posts/visible`);
+      const response = await api.get<VisibleJournalPost[]>(`/journals/${journalId}/posts/timeline`);
       setVisibleJournalPosts(response.data);
       setDecryptedVisiblePosts({});
     } finally {

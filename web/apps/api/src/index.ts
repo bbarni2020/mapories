@@ -1132,6 +1132,8 @@ const createMeetingSchema = z.object({
   longitude: z.number().min(-180).max(180),
 });
 
+const updateMeetingSchema = createMeetingSchema.partial();
+
 app.post("/journals/:journalId/meetings", { preHandler: ensureAuth }, async (request, reply) => {
   const auth = getAuth(request);
   const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
@@ -1161,6 +1163,81 @@ app.post("/journals/:journalId/meetings", { preHandler: ensureAuth }, async (req
   return meeting;
 });
 
+app.get("/journals/:journalId/meetings", { preHandler: ensureAuth }, async (request, reply) => {
+  const auth = getAuth(request);
+  const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
+
+  const isMember = await ensureJournalMember(params.journalId, auth.userId);
+  if (!isMember) {
+    return reply.forbidden("Not a member of this journal");
+  }
+
+  const meetings = await prisma.meeting.findMany({
+    where: { journalId: params.journalId },
+    select: {
+      id: true,
+      title: true,
+      meetingAt: true,
+      timezoneIana: true,
+      timezoneOffsetMinutes: true,
+      locationName: true,
+      photoDataUrl: true,
+      latitude: true,
+      longitude: true,
+      createdAt: true,
+      createdById: true,
+    },
+    orderBy: { meetingAt: "desc" },
+  });
+
+  return meetings.map((meeting) => ({
+    ...meeting,
+    latitude: Number(meeting.latitude),
+    longitude: Number(meeting.longitude),
+  }));
+});
+
+app.patch("/journals/:journalId/meetings/:meetingId", { preHandler: ensureAuth }, async (request, reply) => {
+  const auth = getAuth(request);
+  const params = z.object({ journalId: z.string().cuid(), meetingId: z.string().cuid() }).parse(request.params);
+  const body = updateMeetingSchema.parse(request.body);
+
+  const isMember = await ensureJournalMember(params.journalId, auth.userId);
+  if (!isMember) {
+    return reply.forbidden("Not a member of this journal");
+  }
+
+  const meeting = await prisma.meeting.findFirst({
+    where: { id: params.meetingId, journalId: params.journalId },
+    select: { id: true },
+  });
+
+  if (!meeting) {
+    return reply.notFound("Meeting not found");
+  }
+
+  const updated = await prisma.meeting.update({
+    where: { id: params.meetingId },
+    data: {
+      ...(body.title !== undefined ? { title: body.title } : {}),
+      ...(body.meetingAt !== undefined ? { meetingAt: body.meetingAt } : {}),
+      ...(body.timezoneIana !== undefined ? { timezoneIana: body.timezoneIana } : {}),
+      ...(body.timezoneOffsetMinutes !== undefined ? { timezoneOffsetMinutes: body.timezoneOffsetMinutes } : {}),
+      ...(body.locationName !== undefined ? { locationName: body.locationName } : {}),
+      ...(body.photoDataUrl !== undefined ? { photoDataUrl: body.photoDataUrl } : {}),
+      ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
+      ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
+    },
+  });
+
+  await writeAuditLog(auth.userId, "meeting.update", { meetingId: updated.id });
+  return {
+    ...updated,
+    latitude: Number(updated.latitude),
+    longitude: Number(updated.longitude),
+  };
+});
+
 app.get("/journals/:journalId/markers", { preHandler: ensureAuth }, async (request, reply) => {
   const auth = getAuth(request);
   const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
@@ -1174,6 +1251,7 @@ app.get("/journals/:journalId/markers", { preHandler: ensureAuth }, async (reque
     where: { journalId: params.journalId },
     select: {
       id: true,
+      title: true,
       meetingAt: true,
       locationName: true,
       photoDataUrl: true,
@@ -1495,7 +1573,7 @@ app.get("/meetings/:meetingId/posts", { preHandler: ensureAuth }, async (request
   });
 });
 
-app.get("/journals/:journalId/posts/visible", { preHandler: ensureAuth }, async (request, reply) => {
+app.get("/journals/:journalId/posts/timeline", { preHandler: ensureAuth }, async (request, reply) => {
   const auth = getAuth(request);
   const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
 
@@ -1504,14 +1582,10 @@ app.get("/journals/:journalId/posts/visible", { preHandler: ensureAuth }, async 
     return reply.forbidden("Not allowed to read this journal");
   }
 
-  const now = new Date();
   const posts = await prisma.post.findMany({
     where: {
       meeting: {
         journalId: params.journalId,
-      },
-      visibleAfter: {
-        lte: now,
       },
     },
     select: {
@@ -1557,6 +1631,7 @@ app.get("/journals/:journalId/posts/visible", { preHandler: ensureAuth }, async 
     algorithm: post.algorithm,
     visibleAfter: post.visibleAfter,
     createdAt: post.createdAt,
+    isVisible: post.visibleAfter <= new Date(),
     ciphertextBase64: post.ciphertext.toString("base64"),
     ivBase64: post.iv.toString("base64"),
     meeting: {

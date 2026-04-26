@@ -216,9 +216,36 @@ textarea {
 }
 
 .auth-card {
-  width: min(420px, 100%);
+  width: min(940px, 100%);
   padding: 1.45rem;
   position: relative;
+  overflow: hidden;
+}
+
+.auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 1rem;
+}
+
+.auth-hero,
+.auth-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.34);
+  padding: 1rem;
+}
+
+.auth-hero {
+  display: grid;
+  place-items: stretch;
+  min-height: 100%;
+}
+
+.auth-hero-map-wrap {
+  min-height: 520px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -282,6 +309,23 @@ textarea {
   gap: 1rem;
   margin: 1rem 0 1.2rem;
   border-bottom: 1px solid var(--color-border);
+}
+
+.auth-panel-brand {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.auth-panel-brand p,
+.auth-panel-brand span {
+  margin: 0;
+}
+
+.auth-panel-brand p {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
 }
 
 .auth-tab {
@@ -741,6 +785,58 @@ textarea {
   gap: 0.5rem;
 }
 
+.meeting-list {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.recent-meeting-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid rgba(224, 216, 204, 0.8);
+}
+
+.recent-meeting-card:last-child {
+  border-bottom: 0;
+}
+
+.recent-meeting-card.is-active {
+  color: var(--color-accent);
+}
+
+.feed-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.capsule-countdown {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+}
+
+.countdown-clock {
+  font-family: var(--font-mono);
+  font-size: 1.06rem;
+  letter-spacing: 0.08em;
+  color: var(--color-accent);
+}
+
+.feed-card.is-locked {
+  border-color: rgba(181, 113, 42, 0.18);
+}
+
+.feed-card.is-released {
+  border-color: rgba(181, 113, 42, 0.28);
+  background: rgba(255, 255, 255, 0.44);
+}
+
 .meeting-summary-image {
   width: min(240px, 100%);
   border-radius: var(--radius-md);
@@ -1153,7 +1249,7 @@ textarea {
     bottom: 0.75rem;
     z-index: 14;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
     gap: 0.4rem;
     padding: 0.5rem;
     margin-top: 0.25rem;
@@ -1179,6 +1275,18 @@ textarea {
   .journal-home-meta {
     grid-template-columns: 1fr;
   }
+
+  .map-wrap {
+    min-height: 380px;
+  }
+
+  .journal-home-map {
+    min-height: 430px;
+  }
+
+  .post-map-wrap {
+    min-height: 320px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1191,6 +1299,19 @@ textarea {
     padding: 1.05rem;
   }
 
+  .auth-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-hero,
+  .auth-panel {
+    padding: 0.85rem;
+  }
+
+  .auth-hero-map-wrap {
+    min-height: 320px;
+  }
+
   .auth-tabs {
     margin: 0.8rem 0 1rem;
   }
@@ -1201,6 +1322,19 @@ textarea {
 
   .top-bar {
     padding: 0.75rem 0.8rem;
+  }
+
+  .top-bar,
+  .user-cluster {
+    flex-wrap: wrap;
+  }
+
+  .wordmark span {
+    display: inline-block;
+    max-width: 62vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .section-head,
@@ -1223,7 +1357,7 @@ textarea {
   }
 
   .bottom-tabs {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(66px, 1fr));
   }
 
   .bottom-tabs .nav-item span {
@@ -1232,5 +1366,76 @@ textarea {
 
   .seal-button {
     width: 100%;
+  }
+
+  .capsule-countdown {
+    justify-items: start;
+  }
+
+  .countdown-clock {
+    font-size: 0.96rem;
+  }
+
+  .screen-panel {
+    padding: 1rem;
+  }
+
+  .map-wrap {
+    min-height: 280px;
+  }
+
+  .journal-home-map {
+    min-height: 320px;
+  }
+
+  .post-map-wrap {
+    min-height: 260px;
+  }
+
+  .lightbox {
+    padding: 0.5rem;
+  }
+
+  .lightbox-frame {
+    padding: 0.7rem;
+  }
+}
+
+@media (min-width: 1500px) {
+  .app-shell,
+  .auth-shell {
+    width: min(1700px, calc(100% - 2.5rem));
+  }
+
+  .workspace-shell {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .journal-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .map-wrap {
+    min-height: 540px;
+  }
+
+  .journal-home-map {
+    min-height: 620px;
+  }
+
+  .post-map-wrap {
+    min-height: 420px;
+  }
+
+  .auth-card {
+    width: min(1080px, 100%);
+  }
+
+  .auth-layout {
+    grid-template-columns: minmax(0, 1.1fr) minmax(360px, 460px);
+  }
+
+  .auth-hero-map-wrap {
+    min-height: 620px;
   }
 }

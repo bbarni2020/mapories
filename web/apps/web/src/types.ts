@@ -16,6 +16,7 @@ export type Journal = {
 
 export type Marker = {
   id: string;
+  title: string;
   meetingAt: string;
   locationName: string;
   photoDataUrl?: string | null;
@@ -49,6 +50,7 @@ export type VisibleJournalPost = {
   algorithm: string;
   visibleAfter: string;
   createdAt: string;
+  isVisible: boolean;
   ciphertextBase64: string;
   ivBase64: string;
   meeting: {

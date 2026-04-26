@@ -1,6 +1,6 @@
 services:
   mapories-web:
-    image: ${DOCKER_USERNAME}/${DOCKERHUB_PROJECT_NAME}:latest
+    image: bbarni/mapories:latest
     container_name: mapories-web
     restart: unless-stopped
     ports:
