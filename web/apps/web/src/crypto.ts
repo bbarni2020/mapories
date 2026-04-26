@@ -4,8 +4,16 @@ const textDecoder = new TextDecoder();
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 
-const toBase64 = (bytes: Uint8Array): string =>
-  btoa(String.fromCharCode(...bytes));
+const toBase64 = (bytes: Uint8Array): string => {
+  const chunkSize = 0x8000;
+  const chunks: string[] = [];
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.subarray(index, index + chunkSize)));
+  }
+
+  return btoa(chunks.join(""));
+};
 
 const fromBase64 = (value: string): ArrayBuffer => {
   const raw = atob(value);

@@ -39,6 +39,8 @@ model User {
   refreshSessions       RefreshTokenSession[]
   deviceKeys            UserDeviceKey[]
   keyEnvelopes          JournalKeyEnvelope[]
+  createdBucketItems    BucketListItem[]      @relation("BucketItemCreatedBy")
+  completedBucketItems  BucketListItem[]      @relation("BucketItemCompletedBy")
 }
 
 model UserSubscription {
@@ -82,8 +84,31 @@ model Journal {
   meetings    Meeting[]
   invites     JournalInvite[]
   keyEnvelopes JournalKeyEnvelope[]
+  bucketItems BucketListItem[]
 
   @@index([createdById])
+}
+
+model BucketListItem {
+  id              String    @id @default(cuid())
+  journalId       String
+  name            String
+  description     String?
+  locationName    String?
+  latitude        Decimal?  @db.Decimal(9, 6)
+  longitude       Decimal?  @db.Decimal(9, 6)
+  isCompleted     Boolean   @default(false)
+  completedAt     DateTime?
+  completedById   String?
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  journal         Journal   @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  createdBy       User      @relation("BucketItemCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  completedBy     User?     @relation("BucketItemCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+
+  @@index([journalId, isCompleted, createdAt])
+  @@index([completedById, completedAt])
 }
 
 model JournalMember {

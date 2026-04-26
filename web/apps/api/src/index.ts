@@ -51,7 +51,11 @@ if (appDataKey.length !== 32) {
   throw new Error("APP_DATA_KEY must decode to 32 bytes");
 }
 
-const app = Fastify({ logger: true, trustProxy: true });
+const app = Fastify({
+  logger: true,
+  trustProxy: true,
+  bodyLimit: 60 * 1024 * 1024,
+});
 const googleClient = env.GOOGLE_CLIENT_ID
   ? new OAuth2Client(env.GOOGLE_CLIENT_ID)
   : null;
@@ -85,11 +89,11 @@ const cookieSecure = env.COOKIE_SECURE ?? false;
 
 const normalizeEmail = (value: string): string => value.trim().toLowerCase();
 
-const addOneMonth = (input: Date): Date => {
-  const next = new Date(input);
-  next.setMonth(next.getMonth() + 1);
-  return next;
-};
+const addThirtyDays = (input: Date): Date =>
+  new Date(input.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+const MAX_MEDIA_ITEM_BYTES = 25 * 1024 * 1024;
+const MAX_MEDIA_POST_BYTES = 50 * 1024 * 1024;
 
 const getTokenHash = (value: string): string =>
   createHash("sha256").update(value).digest("hex");
@@ -999,6 +1003,249 @@ app.get("/journals/:journalId/members", { preHandler: ensureAuth }, async (reque
   });
 });
 
+const createBucketItemSchema = z.object({
+  name: z.string().min(2).max(140),
+  description: z.string().max(2000).optional(),
+  locationName: z.string().max(200).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+});
+
+const updateBucketItemSchema = z.object({
+  name: z.string().min(2).max(140).optional(),
+  description: z.string().max(2000).nullable().optional(),
+  locationName: z.string().max(200).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  isCompleted: z.boolean().optional(),
+});
+
+app.get("/journals/:journalId/bucket-items", { preHandler: ensureAuth }, async (request, reply) => {
+  const auth = getAuth(request);
+  const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
+
+  const isMember = await ensureJournalMember(params.journalId, auth.userId);
+  if (!isMember) {
+    return reply.forbidden("Not a member of this journal");
+  }
+
+  const items = await prisma.bucketListItem.findMany({
+    where: { journalId: params.journalId },
+    orderBy: [{ isCompleted: "asc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      locationName: true,
+      latitude: true,
+      longitude: true,
+      isCompleted: true,
+      completedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      createdById: true,
+      completedById: true,
+      createdBy: {
+        select: { nameEncrypted: true },
+      },
+      completedBy: {
+        select: { nameEncrypted: true },
+      },
+    },
+  });
+
+  return items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    description: item.description,
+    locationName: item.locationName,
+    latitude: item.latitude !== null ? Number(item.latitude) : null,
+    longitude: item.longitude !== null ? Number(item.longitude) : null,
+    isCompleted: item.isCompleted,
+    completedAt: item.completedAt,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    createdById: item.createdById,
+    createdByName: decryptString(item.createdBy.nameEncrypted),
+    completedById: item.completedById,
+    completedByName: item.completedBy ? decryptString(item.completedBy.nameEncrypted) : null,
+  }));
+});
+
+app.post("/journals/:journalId/bucket-items", { preHandler: ensureAuth }, async (request, reply) => {
+  const auth = getAuth(request);
+  const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
+  const body = createBucketItemSchema.parse(request.body);
+
+  const isMember = await ensureJournalMember(params.journalId, auth.userId);
+  if (!isMember) {
+    return reply.forbidden("Not a member of this journal");
+  }
+
+  const locationReady = body.locationName || (body.latitude !== undefined && body.longitude !== undefined);
+  if ((body.latitude !== undefined || body.longitude !== undefined) && !locationReady) {
+    return reply.badRequest("Location coordinates must include both latitude and longitude");
+  }
+
+  if ((body.latitude === undefined) !== (body.longitude === undefined)) {
+    return reply.badRequest("Location coordinates must include both latitude and longitude");
+  }
+
+  const created = await prisma.bucketListItem.create({
+    data: {
+      journalId: params.journalId,
+      name: body.name.trim(),
+      description: body.description?.trim() || null,
+      locationName: body.locationName?.trim() || null,
+      latitude: body.latitude,
+      longitude: body.longitude,
+      createdById: auth.userId,
+    },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      locationName: true,
+      latitude: true,
+      longitude: true,
+      isCompleted: true,
+      completedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      createdById: true,
+      completedById: true,
+      createdBy: {
+        select: { nameEncrypted: true },
+      },
+    },
+  });
+
+  await writeAuditLog(auth.userId, "bucket_item.create", {
+    journalId: params.journalId,
+    itemId: created.id,
+  });
+
+  return reply.code(201).send({
+    id: created.id,
+    name: created.name,
+    description: created.description,
+    locationName: created.locationName,
+    latitude: created.latitude !== null ? Number(created.latitude) : null,
+    longitude: created.longitude !== null ? Number(created.longitude) : null,
+    isCompleted: created.isCompleted,
+    completedAt: created.completedAt,
+    createdAt: created.createdAt,
+    updatedAt: created.updatedAt,
+    createdById: created.createdById,
+    createdByName: decryptString(created.createdBy.nameEncrypted),
+    completedById: created.completedById,
+    completedByName: null,
+  });
+});
+
+app.patch(
+  "/journals/:journalId/bucket-items/:itemId",
+  { preHandler: ensureAuth },
+  async (request, reply) => {
+    const auth = getAuth(request);
+    const params = z.object({ journalId: z.string().cuid(), itemId: z.string().cuid() }).parse(request.params);
+    const body = updateBucketItemSchema.parse(request.body);
+
+    const isMember = await ensureJournalMember(params.journalId, auth.userId);
+    if (!isMember) {
+      return reply.forbidden("Not a member of this journal");
+    }
+
+    const existing = await prisma.bucketListItem.findFirst({
+      where: {
+        id: params.itemId,
+        journalId: params.journalId,
+      },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return reply.notFound("Bucket list item not found");
+    }
+
+    if ((body.latitude === null) !== (body.longitude === null)) {
+      return reply.badRequest("Location coordinates must include both latitude and longitude");
+    }
+
+    if (
+      (body.latitude !== undefined || body.longitude !== undefined) &&
+      (body.latitude === undefined || body.longitude === undefined)
+    ) {
+      return reply.badRequest("Location coordinates must include both latitude and longitude");
+    }
+
+    const updated = await prisma.bucketListItem.update({
+      where: { id: params.itemId },
+      data: {
+        ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+        ...(body.description !== undefined
+          ? { description: body.description === null ? null : body.description.trim() }
+          : {}),
+        ...(body.locationName !== undefined
+          ? { locationName: body.locationName === null ? null : body.locationName.trim() }
+          : {}),
+        ...(body.latitude !== undefined ? { latitude: body.latitude } : {}),
+        ...(body.longitude !== undefined ? { longitude: body.longitude } : {}),
+        ...(body.isCompleted !== undefined
+          ? {
+              isCompleted: body.isCompleted,
+              completedAt: body.isCompleted ? new Date() : null,
+              completedById: body.isCompleted ? auth.userId : null,
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        locationName: true,
+        latitude: true,
+        longitude: true,
+        isCompleted: true,
+        completedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        createdById: true,
+        completedById: true,
+        createdBy: {
+          select: { nameEncrypted: true },
+        },
+        completedBy: {
+          select: { nameEncrypted: true },
+        },
+      },
+    });
+
+    await writeAuditLog(auth.userId, "bucket_item.update", {
+      journalId: params.journalId,
+      itemId: updated.id,
+      isCompleted: updated.isCompleted,
+    });
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      description: updated.description,
+      locationName: updated.locationName,
+      latitude: updated.latitude !== null ? Number(updated.latitude) : null,
+      longitude: updated.longitude !== null ? Number(updated.longitude) : null,
+      isCompleted: updated.isCompleted,
+      completedAt: updated.completedAt,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+      createdById: updated.createdById,
+      createdByName: decryptString(updated.createdBy.nameEncrypted),
+      completedById: updated.completedById,
+      completedByName: updated.completedBy ? decryptString(updated.completedBy.nameEncrypted) : null,
+    };
+  },
+);
+
 app.post("/journals/:journalId/invites", { preHandler: ensureAuth }, async (request, reply) => {
   const auth = getAuth(request);
   const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
@@ -1453,20 +1700,46 @@ app.post("/meetings/:meetingId/posts", { preHandler: ensureAuth }, async (reques
     return reply.paymentRequired("No active subscription");
   }
 
-  const mediaPayload = body.media.map((item) => {
-    const blob = Buffer.from(item.dataBase64, "base64");
-    const nonce = Buffer.from(item.nonceBase64, "base64");
+  const mediaPayload: Array<{
+    mimeType: string;
+    blob: Buffer;
+    nonce: Buffer;
+    sizeBytes: number;
+    checksum: string;
+  }> = [];
 
-    return {
+  for (const item of body.media) {
+    let blob: Buffer;
+    let nonce: Buffer;
+    try {
+      blob = Buffer.from(item.dataBase64, "base64");
+      nonce = Buffer.from(item.nonceBase64, "base64");
+    } catch {
+      return reply.badRequest("Invalid media payload encoding");
+    }
+
+    if (!blob.byteLength || !nonce.byteLength) {
+      return reply.badRequest("Invalid media payload encoding");
+    }
+
+    if (blob.byteLength > MAX_MEDIA_ITEM_BYTES) {
+      return reply.badRequest("Each media file must be 25MB or less");
+    }
+
+    mediaPayload.push({
       mimeType: item.mimeType,
       blob,
       nonce,
       sizeBytes: blob.byteLength,
       checksum: checksum(blob),
-    };
-  });
+    });
+  }
 
   const newBytes = mediaPayload.reduce((sum, item) => sum + item.sizeBytes, 0);
+  if (newBytes > MAX_MEDIA_POST_BYTES) {
+    return reply.badRequest("Total media size per post must be 50MB or less");
+  }
+
   const used = Number(activeSub.usedUploadBytes);
   const limit = Number(activeSub.monthlyUploadLimitBytes);
 
@@ -1481,7 +1754,7 @@ app.post("/meetings/:meetingId/posts", { preHandler: ensureAuth }, async (reques
       ciphertext: Buffer.from(body.ciphertextBase64, "base64"),
       iv: Buffer.from(body.ivBase64, "base64"),
       algorithm: body.algorithm,
-      visibleAfter: addOneMonth(meeting.meetingAt),
+      visibleAfter: addThirtyDays(meeting.meetingAt),
       media: {
         create: mediaPayload.map((item) => ({
           mimeType: item.mimeType,

@@ -1,10 +1,19 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { divIcon } from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from "react-leaflet";
 import * as exifr from "exifr";
 import { api, setAuthToken, setCsrfToken } from "./api";
 import { decryptBytes, decryptText, encryptBytes, encryptText } from "./crypto";
-import { AuthUser, Journal, Marker as MeetingMarker, MeetingPost, PostMedia, Role, VisibleJournalPost } from "./types";
+import {
+  AuthUser,
+  BucketListItem,
+  Journal,
+  Marker as MeetingMarker,
+  MeetingPost,
+  PostMedia,
+  Role,
+  VisibleJournalPost,
+} from "./types";
 
 type JournalRow = Journal & {
   _count: {
@@ -87,7 +96,13 @@ type LightboxState = {
   title: string;
 };
 
-type SectionKey = "journals" | "journalHome" | "meetings" | "posts" | "visible" | "admin";
+type PlaceSearchResult = {
+  displayName: string;
+  latitude: number;
+  longitude: number;
+};
+
+type SectionKey = "journals" | "journalHome" | "bucket" | "meetings" | "posts" | "visible" | "admin";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 const DEFAULT_CENTER: [number, number] = [47.4979, 19.0402];
@@ -152,14 +167,22 @@ const warmPinIcon = divIcon({
   `,
 });
 
-const toDataBase64 = (buffer: ArrayBuffer): string => {
-  const bytes = new Uint8Array(buffer);
-  return btoa(String.fromCharCode(...bytes));
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  const chunkSize = 0x8000;
+  const chunks: string[] = [];
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.subarray(index, index + chunkSize)));
+  }
+
+  return btoa(chunks.join(""));
 };
+
+const toDataBase64 = (buffer: ArrayBuffer): string => bytesToBase64(new Uint8Array(buffer));
 
 const createJournalSecret = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes));
+  return bytesToBase64(bytes);
 };
 
 const asGiB = (bytes: number): number => Math.round((bytes / 1024 / 1024 / 1024) * 100) / 100;
@@ -203,6 +226,8 @@ const getCountdown = (targetIso: string, nowMs: number) => {
 };
 
 const pad2 = (value: number): string => String(value).padStart(2, "0");
+
+const normalizePlaceName = (value: string): string => value.trim().replace(/\s+/g, " ");
 
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) {
@@ -277,6 +302,13 @@ const VisibleIcon = () => (
   </Glyph>
 );
 
+const CheckIcon = () => (
+  <Glyph>
+    <rect x="4.5" y="4.5" width="15" height="15" rx="2" />
+    <path d="m8.4 12 2.3 2.3 4.8-4.8" />
+  </Glyph>
+);
+
 const ShieldIcon = () => (
   <Glyph>
     <path d="M12 3.5 18.5 6v5.2c0 4.4-2.9 8.5-6.5 9.3-3.6-.8-6.5-4.9-6.5-9.3V6L12 3.5Z" />
@@ -327,9 +359,18 @@ const GoogleIcon = () => (
   </span>
 );
 
+const MapClickPicker = ({ onPick }: { onPick: (latitude: number, longitude: number) => void }) => {
+  useMapEvents({
+    click: (event) => onPick(event.latlng.lat, event.latlng.lng),
+  });
+
+  return null;
+};
+
 const sectionConfig: Array<{ key: SectionKey; label: string; icon: () => JSX.Element }> = [
   { key: "journals", label: "Manage Journals", icon: BookIcon },
   { key: "journalHome", label: "Journal Home", icon: MapIcon },
+  { key: "bucket", label: "Bucket List", icon: CheckIcon },
   { key: "meetings", label: "Meetings", icon: MapIcon },
   { key: "posts", label: "Posts", icon: PostIcon },
   { key: "visible", label: "Time Capsule", icon: VisibleIcon },
@@ -341,6 +382,7 @@ const tabItems = sectionConfig.filter((item) => item.key !== "admin");
 const sectionTitleMap: Record<SectionKey, string> = {
   journals: "Manage journals",
   journalHome: "Journal home",
+  bucket: "Bucket list",
   meetings: "Meetings",
   posts: "Posts",
   visible: "Time Capsule",
@@ -379,6 +421,19 @@ export const App = () => {
   const [latitude, setLatitude] = useState("47.4979");
   const [longitude, setLongitude] = useState("19.0402");
   const [meetingPreview, setMeetingPreview] = useState<MeetingPreview | null>(null);
+  const [meetingPlaceQuery, setMeetingPlaceQuery] = useState("");
+  const [meetingPlaceResults, setMeetingPlaceResults] = useState<PlaceSearchResult[]>([]);
+  const [meetingPlaceSearchBusy, setMeetingPlaceSearchBusy] = useState(false);
+  const [bucketItems, setBucketItems] = useState<BucketListItem[]>([]);
+  const [bucketName, setBucketName] = useState("");
+  const [bucketDescription, setBucketDescription] = useState("");
+  const [bucketLocationName, setBucketLocationName] = useState("");
+  const [bucketLatitude, setBucketLatitude] = useState("");
+  const [bucketLongitude, setBucketLongitude] = useState("");
+  const [bucketPlaceQuery, setBucketPlaceQuery] = useState("");
+  const [bucketPlaceResults, setBucketPlaceResults] = useState<PlaceSearchResult[]>([]);
+  const [bucketPlaceSearchBusy, setBucketPlaceSearchBusy] = useState(false);
+  const [bucketComposerOpen, setBucketComposerOpen] = useState(false);
 
   const [posts, setPosts] = useState<MeetingPost[]>([]);
   const [decryptedPosts, setDecryptedPosts] = useState<Record<string, string>>({});
@@ -408,6 +463,7 @@ export const App = () => {
   const [loadingMarkers, setLoadingMarkers] = useState(false);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [loadingVisibleJournalPosts, setLoadingVisibleJournalPosts] = useState(false);
+  const [loadingBucketItems, setLoadingBucketItems] = useState(false);
   const [loadingAdmin, setLoadingAdmin] = useState(false);
 
   const onAuthSuccess = (auth: AuthResponse) => {
@@ -517,6 +573,21 @@ export const App = () => {
     }
   };
 
+  const refreshBucketItems = async (journalId: string) => {
+    if (!journalId) {
+      setBucketItems([]);
+      return;
+    }
+
+    setLoadingBucketItems(true);
+    try {
+      const response = await api.get<BucketListItem[]>(`/journals/${journalId}/bucket-items`);
+      setBucketItems(response.data);
+    } finally {
+      setLoadingBucketItems(false);
+    }
+  };
+
   useEffect(() => {
     setAuthToken(token);
     if (!token) {
@@ -524,6 +595,7 @@ export const App = () => {
       setJournals([]);
       setJournalSecrets({});
       setMarkers([]);
+      setBucketItems([]);
       setPosts([]);
       setDecryptedPosts({});
       setAdminOverview(null);
@@ -578,6 +650,7 @@ export const App = () => {
 
     refreshMarkers(selectedJournalId).catch(() => setError("Could not load map markers"));
     refreshVisibleJournalPosts(selectedJournalId).catch(() => setError("Could not load journal timeline"));
+    refreshBucketItems(selectedJournalId).catch(() => setError("Could not load bucket list"));
   }, [selectedJournalId]);
 
   useEffect(() => {
@@ -716,6 +789,7 @@ export const App = () => {
     setDecryptedPosts({});
     setVisibleJournalPosts([]);
     setDecryptedVisiblePosts({});
+    setBucketItems([]);
   };
 
   const loadPosts = async (meetingId: string) => {
@@ -755,6 +829,112 @@ export const App = () => {
     setLongitude("19.0402");
     setMeetingPhotoDataUrl(null);
     setMeetingPreview(null);
+    setMeetingPlaceQuery("");
+    setMeetingPlaceResults([]);
+  };
+
+  const searchPlaces = async (query: string): Promise<PlaceSearchResult[]> => {
+    const normalized = normalizePlaceName(query);
+    if (!normalized) {
+      return [];
+    }
+
+    const url = new URL("https://nominatim.openstreetmap.org/search");
+    url.searchParams.set("q", normalized);
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("limit", "5");
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Place search failed");
+    }
+
+    const raw = (await response.json()) as Array<{
+      display_name: string;
+      lat: string;
+      lon: string;
+    }>;
+
+    return raw
+      .map((item) => ({
+        displayName: item.display_name,
+        latitude: Number(item.lat),
+        longitude: Number(item.lon),
+      }))
+      .filter((item) => Number.isFinite(item.latitude) && Number.isFinite(item.longitude));
+  };
+
+  const reverseGeocodePlace = async (latitudeValue: number, longitudeValue: number): Promise<string | null> => {
+    const url = new URL("https://nominatim.openstreetmap.org/reverse");
+    url.searchParams.set("lat", String(latitudeValue));
+    url.searchParams.set("lon", String(longitudeValue));
+    url.searchParams.set("format", "jsonv2");
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { display_name?: string };
+    return payload.display_name?.trim() || null;
+  };
+
+  const runMeetingPlaceSearch = async () => {
+    const normalized = normalizePlaceName(meetingPlaceQuery);
+    if (!normalized) {
+      setMeetingPlaceResults([]);
+      return;
+    }
+
+    setMeetingPlaceSearchBusy(true);
+    try {
+      const results = await searchPlaces(normalized);
+      setMeetingPlaceResults(results);
+    } catch {
+      setError("Could not search place");
+    } finally {
+      setMeetingPlaceSearchBusy(false);
+    }
+  };
+
+  const applyMeetingPlace = (item: PlaceSearchResult) => {
+    setLatitude(item.latitude.toFixed(6));
+    setLongitude(item.longitude.toFixed(6));
+    setLocationName(item.displayName);
+  };
+
+  const runBucketPlaceSearch = async () => {
+    const normalized = normalizePlaceName(bucketPlaceQuery);
+    if (!normalized) {
+      setBucketPlaceResults([]);
+      return;
+    }
+
+    setBucketPlaceSearchBusy(true);
+    try {
+      const results = await searchPlaces(normalized);
+      setBucketPlaceResults(results);
+    } catch {
+      setError("Could not search place");
+    } finally {
+      setBucketPlaceSearchBusy(false);
+    }
+  };
+
+  const applyBucketPlace = (item: PlaceSearchResult) => {
+    setBucketLatitude(item.latitude.toFixed(6));
+    setBucketLongitude(item.longitude.toFixed(6));
+    setBucketLocationName(item.displayName);
   };
 
   const ensureJournalSecret = async (journalId: string): Promise<string> => {
@@ -971,15 +1151,85 @@ export const App = () => {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setLatitude(position.coords.latitude.toFixed(6));
-        setLongitude(position.coords.longitude.toFixed(6));
-        if (!locationName.trim()) {
-          setLocationName("Current location");
-        }
+        const nextLatitude = position.coords.latitude;
+        const nextLongitude = position.coords.longitude;
+        setLatitude(nextLatitude.toFixed(6));
+        setLongitude(nextLongitude.toFixed(6));
+
+        reverseGeocodePlace(nextLatitude, nextLongitude)
+          .then((nameValue) => {
+            if (nameValue) {
+              setLocationName(nameValue);
+            }
+          })
+          .catch(() => setError("Could not resolve location name"));
       },
       () => setError("Could not get current position"),
       { enableHighAccuracy: true, timeout: 10_000 },
     );
+  };
+
+  const useCurrentBucketPosition = () => {
+    if (!navigator.geolocation) {
+      setError("Geolocation is not available in this browser");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const nextLatitude = position.coords.latitude;
+        const nextLongitude = position.coords.longitude;
+        setBucketLatitude(nextLatitude.toFixed(6));
+        setBucketLongitude(nextLongitude.toFixed(6));
+
+        reverseGeocodePlace(nextLatitude, nextLongitude)
+          .then((nameValue) => {
+            if (nameValue) {
+              setBucketLocationName(nameValue);
+            }
+          })
+          .catch(() => setError("Could not resolve location name"));
+      },
+      () => setError("Could not get current position"),
+      { enableHighAccuracy: true, timeout: 10_000 },
+    );
+  };
+
+  const createBucketItem = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedJournalId || !bucketName.trim()) {
+      return;
+    }
+
+    const payload = {
+      name: bucketName.trim(),
+      description: bucketDescription.trim() || undefined,
+      locationName: bucketLocationName.trim() || undefined,
+      latitude: bucketLatitude.trim() ? Number(bucketLatitude) : undefined,
+      longitude: bucketLongitude.trim() ? Number(bucketLongitude) : undefined,
+    };
+
+    await api.post(`/journals/${selectedJournalId}/bucket-items`, payload);
+    await refreshBucketItems(selectedJournalId);
+    setBucketName("");
+    setBucketDescription("");
+    setBucketLocationName("");
+    setBucketLatitude("");
+    setBucketLongitude("");
+    setBucketPlaceQuery("");
+    setBucketPlaceResults([]);
+    setBucketComposerOpen(false);
+  };
+
+  const toggleBucketItem = async (item: BucketListItem) => {
+    if (!selectedJournalId) {
+      return;
+    }
+
+    await api.patch(`/journals/${selectedJournalId}/bucket-items/${item.id}`, {
+      isCompleted: !item.isCompleted,
+    });
+    await refreshBucketItems(selectedJournalId);
   };
 
   const submitPost = async (event: FormEvent) => {
@@ -1373,6 +1623,32 @@ export const App = () => {
                   </label>
                 </div>
 
+                <div className="row-between">
+                  <input
+                    value={meetingPlaceQuery}
+                    onChange={(event) => setMeetingPlaceQuery(event.target.value)}
+                    placeholder="Search place name"
+                  />
+                  <button className="secondary-button" type="button" onClick={runMeetingPlaceSearch} disabled={meetingPlaceSearchBusy}>
+                    {meetingPlaceSearchBusy ? "Searching..." : "Search"}
+                  </button>
+                </div>
+
+                {meetingPlaceResults.length ? (
+                  <div className="invite-list">
+                    {meetingPlaceResults.map((result) => (
+                      <button
+                        key={`${result.displayName}-${result.latitude}-${result.longitude}`}
+                        className="secondary-button small-button"
+                        type="button"
+                        onClick={() => applyMeetingPlace(result)}
+                      >
+                        {result.displayName}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
                 <label className="drop-zone">
                   <input type="file" accept="image/*" onChange={importMeetingMetadata} />
                   <span className="drop-zone-copy">
@@ -1454,6 +1730,20 @@ export const App = () => {
                       </Popup>
                     </Marker>
                   ))}
+                  <MapClickPicker
+                    onPick={(lat, lng) => {
+                      setLatitude(lat.toFixed(6));
+                      setLongitude(lng.toFixed(6));
+                      reverseGeocodePlace(lat, lng)
+                        .then((nameValue) => {
+                          if (nameValue) {
+                            setLocationName(nameValue);
+                          }
+                        })
+                        .catch(() => setError("Could not resolve location name"));
+                    }}
+                  />
+                  <Marker position={[Number(latitude), Number(longitude)]} icon={warmPinIcon} />
                 </MapContainer>
               </div>
 
@@ -1491,6 +1781,10 @@ export const App = () => {
               <button className="secondary-button" type="button" onClick={() => setActiveSection("visible")} disabled={!selectedJournalId}>
                 <VisibleIcon />
                 Released Posts
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setActiveSection("bucket")} disabled={!selectedJournalId}>
+                <CheckIcon />
+                Bucket List
               </button>
             </div>
           </div>
@@ -1532,6 +1826,209 @@ export const App = () => {
                 <strong>{selectedMeeting ? formatDate(selectedMeeting.meetingAt) : "None"}</strong>
               </div>
             </div>
+          </div>
+        </section>
+      );
+    }
+
+    if (activeSection === "bucket") {
+      return (
+        <section className="screen-panel">
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">{sectionTitleMap.bucket}</p>
+              <h2>Shared plans for this journal.</h2>
+            </div>
+            <div className="section-actions">
+              <button className="secondary-button" type="button" onClick={useCurrentBucketPosition}>
+                <LocationIcon />
+                Use My Location
+              </button>
+            </div>
+          </div>
+
+          <div className="journal-layout">
+            <div className="split-form">
+              <div className="row-between">
+                <div>
+                  <p className="eyebrow">Item creation</p>
+                  <h4>Open the dropdown to add an item</h4>
+                </div>
+                <button className="secondary-button" type="button" onClick={() => setBucketComposerOpen((value) => !value)}>
+                  {bucketComposerOpen ? "Hide" : "Add item"}
+                </button>
+              </div>
+
+              {bucketComposerOpen ? (
+                <form className="stack-tight" onSubmit={createBucketItem}>
+                  <label>
+                    <span>Item name</span>
+                    <input value={bucketName} onChange={(event) => setBucketName(event.target.value)} placeholder="Sunrise at Fisherman's Bastion" />
+                  </label>
+                  <label>
+                    <span>Description</span>
+                    <textarea
+                      value={bucketDescription}
+                      onChange={(event) => setBucketDescription(event.target.value)}
+                      rows={4}
+                      placeholder="Optional details for everyone"
+                    />
+                  </label>
+                  <label>
+                    <span>Optional location name</span>
+                    <input
+                      value={bucketLocationName}
+                      onChange={(event) => setBucketLocationName(event.target.value)}
+                      placeholder="Danube Promenade"
+                    />
+                  </label>
+                  <div className="grid-two-up">
+                    <label>
+                      <span>Lat (optional)</span>
+                      <input value={bucketLatitude} onChange={(event) => setBucketLatitude(event.target.value)} placeholder="47.4979" />
+                    </label>
+                    <label>
+                      <span>Lng (optional)</span>
+                      <input value={bucketLongitude} onChange={(event) => setBucketLongitude(event.target.value)} placeholder="19.0402" />
+                    </label>
+                  </div>
+                  <div className="row-between">
+                    <input
+                      value={bucketPlaceQuery}
+                      onChange={(event) => setBucketPlaceQuery(event.target.value)}
+                      placeholder="Search place name"
+                    />
+                    <button className="secondary-button" type="button" onClick={runBucketPlaceSearch} disabled={bucketPlaceSearchBusy}>
+                      {bucketPlaceSearchBusy ? "Searching..." : "Search"}
+                    </button>
+                  </div>
+                  {bucketPlaceResults.length ? (
+                    <div className="invite-list">
+                      {bucketPlaceResults.map((result) => (
+                        <button
+                          key={`${result.displayName}-${result.latitude}-${result.longitude}`}
+                          className="secondary-button small-button"
+                          type="button"
+                          onClick={() => applyBucketPlace(result)}
+                        >
+                          {result.displayName}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="map-wrap" style={{ minHeight: "240px" }}>
+                    <MapContainer
+                      center={
+                        bucketLatitude && bucketLongitude
+                          ? [Number(bucketLatitude), Number(bucketLongitude)]
+                          : selectedCenter
+                      }
+                      zoom={8}
+                      scrollWheelZoom
+                      style={{ height: "100%" }}
+                    >
+                      <TileLayer
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                      />
+                      <MapClickPicker
+                        onPick={(lat, lng) => {
+                          setBucketLatitude(lat.toFixed(6));
+                          setBucketLongitude(lng.toFixed(6));
+                          reverseGeocodePlace(lat, lng)
+                            .then((nameValue) => {
+                              if (nameValue) {
+                                setBucketLocationName(nameValue);
+                              }
+                            })
+                            .catch(() => setError("Could not resolve location name"));
+                        }}
+                      />
+                      {bucketLatitude && bucketLongitude ? (
+                        <Marker position={[Number(bucketLatitude), Number(bucketLongitude)]} icon={warmPinIcon} />
+                      ) : null}
+                    </MapContainer>
+                  </div>
+                  <button className="primary-button" type="submit" disabled={!selectedJournalId || !bucketName.trim()}>
+                    <PlusIcon />
+                    Add Item
+                  </button>
+                </form>
+              ) : null}
+            </div>
+
+            <aside className="journal-detail panel-soft">
+              <div className="stack-tight">
+                <p className="eyebrow">Team checklist</p>
+                <h3>{selectedJournal?.name ?? "Select a journal"}</h3>
+              </div>
+
+              <div className="invite-list">
+                {loadingBucketItems ? (
+                  <>
+                    <div className="skeleton card-skeleton" />
+                    <div className="skeleton card-skeleton" />
+                  </>
+                ) : bucketItems.length ? (
+                  <>
+                    <div className="bucket-section-head">
+                      <span className="status-pill">To do</span>
+                      <span className="muted-copy">{bucketItems.filter((item) => !item.isCompleted).length} items</span>
+                    </div>
+                    {bucketItems.filter((item) => !item.isCompleted).map((item) => (
+                      <div className="bucket-item-row is-pending" key={item.id}>
+                        <button className="bucket-check" type="button" onClick={() => toggleBucketItem(item)} aria-label={`Mark ${item.name} done`}>
+                          ○
+                        </button>
+                        <div>
+                          <p className="bucket-item-title">{item.name}</p>
+                          {item.description ? <p className="muted-copy">{item.description}</p> : null}
+                          {item.locationName || (item.latitude !== null && item.longitude !== null) ? (
+                            <p className="muted-copy">
+                              {item.locationName ?? "Custom location"}
+                              {item.latitude !== null && item.longitude !== null
+                                ? ` · ${item.latitude.toFixed(3)}, ${item.longitude.toFixed(3)}`
+                                : ""}
+                            </p>
+                          ) : null}
+                          <p className="muted-copy">Added by {item.createdByName}</p>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="bucket-section-head">
+                      <span className="status-pill is-positive">Completed</span>
+                      <span className="muted-copy">{bucketItems.filter((item) => item.isCompleted).length} items</span>
+                    </div>
+                    {bucketItems.filter((item) => item.isCompleted).map((item) => (
+                      <div className="bucket-item-row is-completed" key={item.id}>
+                        <button className="bucket-check" type="button" onClick={() => toggleBucketItem(item)} aria-label={`Mark ${item.name} not done`}>
+                          ✓
+                        </button>
+                        <div>
+                          <p className="bucket-item-title">{item.name}</p>
+                          {item.description ? <p className="muted-copy">{item.description}</p> : null}
+                          {item.locationName || (item.latitude !== null && item.longitude !== null) ? (
+                            <p className="muted-copy">
+                              {item.locationName ?? "Custom location"}
+                              {item.latitude !== null && item.longitude !== null
+                                ? ` · ${item.latitude.toFixed(3)}, ${item.longitude.toFixed(3)}`
+                                : ""}
+                            </p>
+                          ) : null}
+                          <p className="muted-copy">
+                            Added by {item.createdByName}
+                            {item.completedByName ? ` · done by ${item.completedByName}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <p className="muted-copy">No items yet. Add the first one from the left panel.</p>
+                )}
+              </div>
+            </aside>
           </div>
         </section>
       );
@@ -1743,7 +2240,7 @@ export const App = () => {
             ) : visibleJournalPosts.length ? (
               visibleJournalPosts.map((post) => {
                 const countdown = getCountdown(post.visibleAfter, capsuleNow);
-                const revealed = countdown.done;
+                const revealed = countdown.done || post.authorId === user.id;
 
                 return (
                   <article key={post.id} className={`feed-card ${revealed ? "is-released" : "is-locked"}`}>
@@ -1964,6 +2461,7 @@ export const App = () => {
     journalSecrets,
     journals,
     loadingAdmin,
+    loadingBucketItems,
     loadingJournals,
     loadingMarkers,
     loadingPosts,
@@ -1972,6 +2470,9 @@ export const App = () => {
     meetingEditorId,
     markers,
     meetingDate,
+    meetingPlaceQuery,
+    meetingPlaceResults,
+    meetingPlaceSearchBusy,
     meetingPreview,
     meetingTitle,
     newPlanName,
@@ -1985,10 +2486,27 @@ export const App = () => {
     postText,
     decryptedVisiblePosts,
     posts,
+    bucketDescription,
+    bucketItems,
+    bucketLatitude,
+    bucketLocationName,
+    bucketLongitude,
+    bucketName,
+    bucketComposerOpen,
+    bucketPlaceQuery,
+    bucketPlaceResults,
+    bucketPlaceSearchBusy,
     renameJournalName,
+    applyBucketPlace,
+    applyMeetingPlace,
+    createBucketItem,
+    refreshBucketItems,
     loadPosts,
+    runBucketPlaceSearch,
+    runMeetingPlaceSearch,
     openMeetingForEdit,
     resetMeetingForm,
+    reverseGeocodePlace,
     saveMeeting,
     selectedCenter,
     selectedDraftMeeting,

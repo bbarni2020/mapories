@@ -62,3 +62,20 @@ export type VisibleJournalPost = {
   };
   media: PostMedia[];
 };
+
+export type BucketListItem = {
+  id: string;
+  name: string;
+  description: string | null;
+  locationName: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  isCompleted: boolean;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdById: string;
+  createdByName: string;
+  completedById: string | null;
+  completedByName: string | null;
+};
