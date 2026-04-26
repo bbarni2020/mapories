@@ -41,6 +41,9 @@ const envSchema = z.object({
 });
 
 const env = envSchema.parse(process.env);
+const corsOrigins = env.CORS_ORIGIN.split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 const prisma = new PrismaClient();
 const appDataKey = Buffer.from(env.APP_DATA_KEY, "hex");
 
@@ -58,7 +61,7 @@ await app.register(cookie, {
   hook: "onRequest",
 });
 await app.register(cors, {
-  origin: env.CORS_ORIGIN,
+  origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
   credentials: true,
 });
 await app.register(jwt, {
@@ -246,7 +249,7 @@ const setCookieAuth = (reply: FastifyReply, accessToken: string, refreshToken: s
     httpOnly: true,
     secure: cookieSecure,
     sameSite: "lax",
-    path: "/auth",
+    path: "/api/auth",
     maxAge: env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60,
   });
 
