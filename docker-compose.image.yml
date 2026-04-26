@@ -1,0 +1,7 @@
+services:
+  mapories-web:
+    image: ${DOCKER_USERNAME}/${DOCKERHUB_PROJECT_NAME}:latest
+    container_name: mapories-web
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
