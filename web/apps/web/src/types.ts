@@ -41,3 +41,22 @@ export type MeetingPost = {
   ivBase64: string;
   media: PostMedia[];
 };
+
+export type VisibleJournalPost = {
+  id: string;
+  authorId: string;
+  authorName: string;
+  algorithm: string;
+  visibleAfter: string;
+  createdAt: string;
+  ciphertextBase64: string;
+  ivBase64: string;
+  meeting: {
+    id: string;
+    title: string;
+    locationName: string;
+    meetingAt: string;
+    photoDataUrl?: string | null;
+  };
+  media: PostMedia[];
+};

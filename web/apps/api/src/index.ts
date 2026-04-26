@@ -1124,6 +1124,8 @@ app.post("/journals/join", { preHandler: ensureAuth }, async (request, reply) =>
 const createMeetingSchema = z.object({
   title: z.string().min(2).max(160),
   meetingAt: z.coerce.date(),
+  timezoneIana: z.string().max(80).optional(),
+  timezoneOffsetMinutes: z.number().int().min(-840).max(840).optional(),
   locationName: z.string().min(2).max(200),
   photoDataUrl: z.string().max(1_200_000).optional(),
   latitude: z.number().min(-90).max(90),
@@ -1145,6 +1147,8 @@ app.post("/journals/:journalId/meetings", { preHandler: ensureAuth }, async (req
       journalId: params.journalId,
       title: body.title,
       meetingAt: body.meetingAt,
+      timezoneIana: body.timezoneIana,
+      timezoneOffsetMinutes: body.timezoneOffsetMinutes,
       locationName: body.locationName,
       photoDataUrl: body.photoDataUrl,
       latitude: body.latitude,
@@ -1489,6 +1493,87 @@ app.get("/meetings/:meetingId/posts", { preHandler: ensureAuth }, async (request
       ivBase64: iv.toString("base64"),
     };
   });
+});
+
+app.get("/journals/:journalId/posts/visible", { preHandler: ensureAuth }, async (request, reply) => {
+  const auth = getAuth(request);
+  const params = z.object({ journalId: z.string().cuid() }).parse(request.params);
+
+  const isMember = await ensureJournalMember(params.journalId, auth.userId);
+  if (!isMember) {
+    return reply.forbidden("Not allowed to read this journal");
+  }
+
+  const now = new Date();
+  const posts = await prisma.post.findMany({
+    where: {
+      meeting: {
+        journalId: params.journalId,
+      },
+      visibleAfter: {
+        lte: now,
+      },
+    },
+    select: {
+      id: true,
+      authorId: true,
+      algorithm: true,
+      iv: true,
+      ciphertext: true,
+      visibleAfter: true,
+      createdAt: true,
+      author: {
+        select: {
+          nameEncrypted: true,
+        },
+      },
+      meeting: {
+        select: {
+          id: true,
+          title: true,
+          locationName: true,
+          meetingAt: true,
+          photoDataUrl: true,
+        },
+      },
+      media: {
+        select: {
+          id: true,
+          mimeType: true,
+          sizeBytes: true,
+          nonce: true,
+          createdAt: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+
+  return posts.map((post) => ({
+    id: post.id,
+    authorId: post.authorId,
+    authorName: decryptString(post.author.nameEncrypted),
+    algorithm: post.algorithm,
+    visibleAfter: post.visibleAfter,
+    createdAt: post.createdAt,
+    ciphertextBase64: post.ciphertext.toString("base64"),
+    ivBase64: post.iv.toString("base64"),
+    meeting: {
+      id: post.meeting.id,
+      title: post.meeting.title,
+      locationName: post.meeting.locationName,
+      meetingAt: post.meeting.meetingAt,
+      photoDataUrl: post.meeting.photoDataUrl,
+    },
+    media: post.media.map((item) => ({
+      id: item.id,
+      mimeType: item.mimeType,
+      sizeBytes: item.sizeBytes,
+      createdAt: item.createdAt,
+      nonceBase64: item.nonce.toString("base64"),
+    })),
+  }));
 });
 
 app.get("/media/:mediaId", { preHandler: ensureAuth }, async (request, reply) => {

@@ -113,6 +113,8 @@ model Meeting {
   journalId    String
   title        String
   meetingAt    DateTime
+  timezoneIana String?
+  timezoneOffsetMinutes Int?
   locationName String
   photoDataUrl String?
   latitude     Decimal   @db.Decimal(9, 6)

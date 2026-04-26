@@ -1,10 +1,10 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { divIcon } from "leaflet";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from "react-leaflet";
 import * as exifr from "exifr";
 import { api, setAuthToken, setCsrfToken } from "./api";
 import { decryptBytes, decryptText, encryptBytes, encryptText } from "./crypto";
-import { AuthUser, Journal, Marker as MeetingMarker, MeetingPost, PostMedia, Role } from "./types";
+import { AuthUser, Journal, Marker as MeetingMarker, MeetingPost, PostMedia, Role, VisibleJournalPost } from "./types";
 
 type JournalRow = Journal & {
   _count: {
@@ -87,7 +87,7 @@ type LightboxState = {
   title: string;
 };
 
-type SectionKey = "journals" | "meetings" | "posts" | "visible" | "admin";
+type SectionKey = "journals" | "journalHome" | "meetings" | "posts" | "visible" | "admin";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 const DEFAULT_CENTER: [number, number] = [47.4979, 19.0402];
@@ -253,8 +253,19 @@ const GoogleIcon = () => (
   </span>
 );
 
+const MapClickPicker = ({ onPick }: { onPick: (lat: number, lng: number) => void }) => {
+  useMapEvents({
+    click: (event) => {
+      onPick(event.latlng.lat, event.latlng.lng);
+    },
+  });
+
+  return null;
+};
+
 const sectionConfig: Array<{ key: SectionKey; label: string; icon: () => JSX.Element }> = [
-  { key: "journals", label: "Journals", icon: BookIcon },
+  { key: "journals", label: "Manage Journals", icon: BookIcon },
+  { key: "journalHome", label: "Journal Home", icon: MapIcon },
   { key: "meetings", label: "Meetings", icon: MapIcon },
   { key: "posts", label: "Posts", icon: PostIcon },
   { key: "visible", label: "Visible Posts", icon: VisibleIcon },
@@ -264,7 +275,8 @@ const sectionConfig: Array<{ key: SectionKey; label: string; icon: () => JSX.Ele
 const tabItems = sectionConfig.filter((item) => item.key !== "admin");
 
 const sectionTitleMap: Record<SectionKey, string> = {
-  journals: "Journals",
+  journals: "Manage journals",
+  journalHome: "Journal home",
   meetings: "Meetings",
   posts: "Posts",
   visible: "Visible posts",
@@ -294,8 +306,9 @@ export const App = () => {
 
   const [markers, setMarkers] = useState<MeetingMarker[]>([]);
   const [selectedMeetingId, setSelectedMeetingId] = useState<string>("");
+  const [postDraftMeetingId, setPostDraftMeetingId] = useState<string>("");
   const [meetingTitle, setMeetingTitle] = useState("");
-  const [meetingDate, setMeetingDate] = useState("");
+  const [meetingDate, setMeetingDate] = useState(toDatetimeLocalValue(new Date()));
   const [locationName, setLocationName] = useState("");
   const [meetingPhotoDataUrl, setMeetingPhotoDataUrl] = useState<string | null>(null);
   const [latitude, setLatitude] = useState("47.4979");
@@ -304,9 +317,16 @@ export const App = () => {
 
   const [posts, setPosts] = useState<MeetingPost[]>([]);
   const [decryptedPosts, setDecryptedPosts] = useState<Record<string, string>>({});
+  const [visibleJournalPosts, setVisibleJournalPosts] = useState<VisibleJournalPost[]>([]);
+  const [decryptedVisiblePosts, setDecryptedVisiblePosts] = useState<Record<string, string>>({});
   const [postText, setPostText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [attachmentPreviews, setAttachmentPreviews] = useState<AttachmentPreview[]>([]);
+  const [postMeetingTitle, setPostMeetingTitle] = useState("");
+  const [postMeetingDate, setPostMeetingDate] = useState(toDatetimeLocalValue(new Date()));
+  const [postLocationName, setPostLocationName] = useState("");
+  const [postLatitude, setPostLatitude] = useState("47.4979");
+  const [postLongitude, setPostLongitude] = useState("19.0402");
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null);
@@ -324,6 +344,7 @@ export const App = () => {
   const [loadingJournals, setLoadingJournals] = useState(false);
   const [loadingMarkers, setLoadingMarkers] = useState(false);
   const [loadingPosts, setLoadingPosts] = useState(false);
+  const [loadingVisibleJournalPosts, setLoadingVisibleJournalPosts] = useState(false);
   const [loadingAdmin, setLoadingAdmin] = useState(false);
 
   const onAuthSuccess = (auth: AuthResponse) => {
@@ -416,6 +437,23 @@ export const App = () => {
     }
   };
 
+  const refreshVisibleJournalPosts = async (journalId: string) => {
+    if (!journalId) {
+      setVisibleJournalPosts([]);
+      setDecryptedVisiblePosts({});
+      return;
+    }
+
+    setLoadingVisibleJournalPosts(true);
+    try {
+      const response = await api.get<VisibleJournalPost[]>(`/journals/${journalId}/posts/visible`);
+      setVisibleJournalPosts(response.data);
+      setDecryptedVisiblePosts({});
+    } finally {
+      setLoadingVisibleJournalPosts(false);
+    }
+  };
+
   useEffect(() => {
     setAuthToken(token);
     if (!token) {
@@ -471,10 +509,12 @@ export const App = () => {
   useEffect(() => {
     if (!selectedJournalId) {
       setMarkers([]);
+      setVisibleJournalPosts([]);
       return;
     }
 
     refreshMarkers(selectedJournalId).catch(() => setError("Could not load map markers"));
+    refreshVisibleJournalPosts(selectedJournalId).catch(() => setError("Could not load visible posts"));
   }, [selectedJournalId]);
 
   useEffect(() => {
@@ -533,6 +573,14 @@ export const App = () => {
     }
   }, [selectedJournalId, activeSection]);
 
+  useEffect(() => {
+    if (!selectedMeetingId) {
+      return;
+    }
+
+    setPostDraftMeetingId(selectedMeetingId);
+  }, [selectedMeetingId]);
+
   const selectedJournal = useMemo(
     () => journals.find((journal) => journal.id === selectedJournalId) ?? null,
     [journals, selectedJournalId],
@@ -551,11 +599,17 @@ export const App = () => {
     [markers, selectedMeetingId],
   );
 
+  const selectedDraftMeeting = useMemo(
+    () => markers.find((marker) => marker.id === postDraftMeetingId) ?? null,
+    [markers, postDraftMeetingId],
+  );
+
   const currentJournalSecret = selectedJournalId ? journalSecrets[selectedJournalId] ?? "" : "";
   const visibleInviteEntries = selectedJournalId ? inviteEntriesByJournal[selectedJournalId] ?? [] : [];
 
   const loadPosts = async (meetingId: string) => {
     setSelectedMeetingId(meetingId);
+    setPostDraftMeetingId(meetingId);
     await refreshPosts(meetingId);
     setActiveSection("visible");
   };
@@ -680,6 +734,8 @@ export const App = () => {
     await api.post(`/journals/${selectedJournalId}/meetings`, {
       title: meetingTitle,
       meetingAt: new Date(meetingDate).toISOString(),
+      timezoneIana: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezoneOffsetMinutes: -new Date(meetingDate || Date.now()).getTimezoneOffset(),
       locationName,
       photoDataUrl: meetingPhotoDataUrl ?? undefined,
       latitude: Number(latitude),
@@ -688,7 +744,7 @@ export const App = () => {
 
     await refreshMarkers(selectedJournalId);
     setMeetingTitle("");
-    setMeetingDate("");
+    setMeetingDate(toDatetimeLocalValue(new Date()));
     setLocationName("");
     setMeetingPhotoDataUrl(null);
     setMeetingPreview(null);
@@ -776,9 +832,32 @@ export const App = () => {
 
   const submitPost = async (event: FormEvent) => {
     event.preventDefault();
-    if (!selectedMeetingId || !selectedJournalId) {
-      setError("Select a meeting first");
+    if (!selectedJournalId) {
+      setError("Select a journal first");
       return;
+    }
+
+    let workingMeetingId = postDraftMeetingId || selectedMeetingId;
+    if (!workingMeetingId) {
+      if (!postMeetingTitle.trim() || !postLocationName.trim() || !postMeetingDate) {
+        setError("Set meeting title, date and location for this post");
+        return;
+      }
+
+      const meetingResponse = await api.post<MeetingMarker>(`/journals/${selectedJournalId}/meetings`, {
+        title: postMeetingTitle.trim(),
+        meetingAt: new Date(postMeetingDate).toISOString(),
+        timezoneIana: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timezoneOffsetMinutes: -new Date(postMeetingDate).getTimezoneOffset(),
+        locationName: postLocationName.trim(),
+        latitude: Number(postLatitude),
+        longitude: Number(postLongitude),
+      });
+
+      workingMeetingId = meetingResponse.data.id;
+      setSelectedMeetingId(workingMeetingId);
+      setPostDraftMeetingId(workingMeetingId);
+      await refreshMarkers(selectedJournalId);
     }
 
     const journalSecret = currentJournalSecret || (await ensureJournalSecret(selectedJournalId));
@@ -797,7 +876,7 @@ export const App = () => {
       }),
     );
 
-    await api.post(`/meetings/${selectedMeetingId}/posts`, {
+    await api.post(`/meetings/${workingMeetingId}/posts`, {
       ciphertextBase64: encryptedText.ciphertextBase64,
       ivBase64: encryptedText.ivBase64,
       algorithm: "AES-256-GCM",
@@ -806,7 +885,11 @@ export const App = () => {
 
     setPostText("");
     setFiles([]);
-    await refreshPosts(selectedMeetingId);
+    setPostMeetingTitle("");
+    setPostLocationName("");
+    setPostMeetingDate(toDatetimeLocalValue(new Date()));
+    await refreshPosts(workingMeetingId);
+    await refreshVisibleJournalPosts(selectedJournalId);
   };
 
   const decryptLoadedPosts = async () => {
@@ -826,6 +909,25 @@ export const App = () => {
     }
 
     setDecryptedPosts(next);
+  };
+
+  const decryptVisibleJournalPosts = async () => {
+    if (!selectedJournalId) {
+      return;
+    }
+
+    const journalSecret = currentJournalSecret || (await ensureJournalSecret(selectedJournalId));
+    const next: Record<string, string> = {};
+
+    for (const post of visibleJournalPosts) {
+      try {
+        next[post.id] = await decryptText(post.ciphertextBase64, post.ivBase64, journalSecret, selectedJournalId);
+      } catch {
+        next[post.id] = "[Locked or wrong secret]";
+      }
+    }
+
+    setDecryptedVisiblePosts(next);
   };
 
   const openDecryptedMedia = async (media: PostMedia) => {
@@ -1002,7 +1104,7 @@ export const App = () => {
                     className={`journal-card ${journal.id === selectedJournalId ? "is-selected" : ""}`}
                     onClick={() => {
                       setSelectedJournalId(journal.id);
-                      setActiveSection("journals");
+                      setActiveSection("journalHome");
                     }}
                   >
                     <div className="card-topline">
@@ -1197,6 +1299,68 @@ export const App = () => {
       );
     }
 
+    if (activeSection === "journalHome") {
+      return (
+        <section className="screen-panel">
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">{sectionTitleMap.journalHome}</p>
+              <h2>{selectedJournal?.name ?? "Select a journal"}</h2>
+            </div>
+            <div className="section-actions">
+              <button className="secondary-button" type="button" onClick={() => setActiveSection("posts")} disabled={!selectedJournalId}>
+                <PostIcon />
+                New Post
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setActiveSection("visible")} disabled={!selectedJournalId}>
+                <VisibleIcon />
+                Released Posts
+              </button>
+            </div>
+          </div>
+
+          <div className="map-panel panel-soft">
+            <div className="map-wrap journal-home-map">
+              <MapContainer center={selectedCenter} zoom={5} scrollWheelZoom style={{ height: "100%" }}>
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                />
+                {markers.map((marker) => (
+                  <Marker key={marker.id} position={[marker.latitude, marker.longitude]} icon={warmPinIcon}>
+                    <Popup>
+                      <strong>{marker.locationName}</strong>
+                      <br />
+                      {formatDateTime(marker.meetingAt)}
+                      <br />
+                      <button className="secondary-button small-button" type="button" onClick={() => loadPosts(marker.id)}>
+                        Open posts
+                      </button>
+                    </Popup>
+                  </Marker>
+                ))}
+              </MapContainer>
+            </div>
+
+            <div className="journal-home-meta">
+              <div className="stat-card">
+                <span>Places visited</span>
+                <strong>{markers.length}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Released posts</span>
+                <strong>{visibleJournalPosts.length}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Selected meeting</span>
+                <strong>{selectedMeeting ? formatDate(selectedMeeting.meetingAt) : "None"}</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+      );
+    }
+
     if (activeSection === "posts") {
       return (
         <section className="screen-panel">
@@ -1210,6 +1374,103 @@ export const App = () => {
                 <LockIcon />
                 Encrypted with journal key
               </span>
+            </div>
+          </div>
+
+          <div className="post-map-layout">
+            <div className="map-panel panel-soft">
+              <div className="map-wrap post-map-wrap">
+                <MapContainer center={[Number(postLatitude), Number(postLongitude)]} zoom={7} scrollWheelZoom style={{ height: "100%" }}>
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                  />
+                  <MapClickPicker
+                    onPick={(lat, lng) => {
+                      setPostLatitude(lat.toFixed(6));
+                      setPostLongitude(lng.toFixed(6));
+                    }}
+                  />
+                  {markers.map((marker) => (
+                    <Marker key={marker.id} position={[marker.latitude, marker.longitude]} icon={warmPinIcon}>
+                      <Popup>
+                        <strong>{marker.locationName}</strong>
+                        <br />
+                        {formatDateTime(marker.meetingAt)}
+                        <br />
+                        <button
+                          className="secondary-button small-button"
+                          type="button"
+                          onClick={() => {
+                            setPostDraftMeetingId(marker.id);
+                            setSelectedMeetingId(marker.id);
+                            refreshPosts(marker.id).catch(() => setError("Could not load recent posts"));
+                          }}
+                        >
+                          Use this meeting
+                        </button>
+                      </Popup>
+                    </Marker>
+                  ))}
+                  {!postDraftMeetingId ? (
+                    <Marker position={[Number(postLatitude), Number(postLongitude)]} icon={warmPinIcon} />
+                  ) : null}
+                </MapContainer>
+              </div>
+            </div>
+
+            <div className="panel-soft post-meta-form">
+              <label>
+                <span>Meeting for this post</span>
+                <select
+                  value={postDraftMeetingId}
+                  onChange={(event) => {
+                    const nextMeetingId = event.target.value;
+                    setPostDraftMeetingId(nextMeetingId);
+                    if (nextMeetingId) {
+                      setSelectedMeetingId(nextMeetingId);
+                      refreshPosts(nextMeetingId).catch(() => setError("Could not load recent posts"));
+                    }
+                  }}
+                >
+                  <option value="">Create from map/date below</option>
+                  {markers.map((marker) => (
+                    <option key={marker.id} value={marker.id}>
+                      {marker.locationName} · {formatDate(marker.meetingAt)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {!postDraftMeetingId ? (
+                <>
+                  <label>
+                    <span>Meeting title</span>
+                    <input value={postMeetingTitle} onChange={(event) => setPostMeetingTitle(event.target.value)} placeholder="Sunset walk" />
+                  </label>
+                  <label>
+                    <span>Date</span>
+                    <input type="datetime-local" value={postMeetingDate} onChange={(event) => setPostMeetingDate(event.target.value)} />
+                  </label>
+                  <label>
+                    <span>Location name</span>
+                    <input value={postLocationName} onChange={(event) => setPostLocationName(event.target.value)} placeholder="Margaret Island" />
+                  </label>
+                </>
+              ) : (
+                <p className="muted-copy">Posting into selected meeting: {selectedDraftMeeting?.locationName ?? "Meeting"}</p>
+              )}
+
+              <div className="grid-two-up">
+                <label>
+                  <span>Lat</span>
+                  <input value={postLatitude} onChange={(event) => setPostLatitude(event.target.value)} />
+                </label>
+                <label>
+                  <span>Lng</span>
+                  <input value={postLongitude} onChange={(event) => setPostLongitude(event.target.value)} />
+                </label>
+              </div>
             </div>
           </div>
 
@@ -1271,7 +1532,7 @@ export const App = () => {
 
               <div className="compose-footer">
                 <span className="muted-copy">{postText.length} characters</span>
-                <button className="primary-button seal-button" type="submit" disabled={!selectedMeetingId}>
+                <button className="primary-button seal-button" type="submit">
                   Seal &amp; Publish
                 </button>
               </div>
@@ -1279,10 +1540,20 @@ export const App = () => {
           </div>
 
           <div className="meeting-hint panel-soft">
-            <p className="eyebrow">Current thread</p>
-            <h4>{selectedMeeting ? selectedMeeting.locationName : "Pick a meeting marker first"}</h4>
-            <p className="muted-copy">{selectedMeeting ? formatDateTime(selectedMeeting.meetingAt) : "Posts publish into the selected meeting."}</p>
-            <p className="mono-chip">{selectedMeetingId || "No meeting selected"}</p>
+            <p className="eyebrow">Recent written posts</p>
+            {posts.length ? (
+              posts.slice(-3).reverse().map((post) => (
+                <article key={post.id} className="recent-post-row">
+                  <div>
+                    <p>{formatDateTime(post.createdAt)}</p>
+                    <span className="muted-copy">Visible after {formatDateTime(post.visibleAfter)}</span>
+                  </div>
+                  <span className="status-pill">{post.media.length} media</span>
+                </article>
+              ))
+            ) : (
+              <p className="muted-copy">No posts yet in this meeting thread.</p>
+            )}
           </div>
         </section>
       );
@@ -1300,36 +1571,33 @@ export const App = () => {
               <LockIcon />
               Decrypt loaded posts
             </button>
+            <button className="secondary-button" type="button" onClick={decryptVisibleJournalPosts} disabled={!visibleJournalPosts.length}>
+              <LockIcon />
+              Decrypt released feed
+            </button>
           </div>
 
-          {!selectedMeetingId ? (
-            <div className="empty-state">
-              <MapIcon />
-              <p>Pick a meeting marker from Meetings to load posts.</p>
-              <button className="secondary-button" type="button" onClick={() => setActiveSection("meetings")}>
-                Go to Meetings
-              </button>
-            </div>
-          ) : null}
-
           <div className="feed-column">
-            {loadingPosts ? (
+            {loadingVisibleJournalPosts ? (
               <>
                 <div className="skeleton feed-skeleton" />
                 <div className="skeleton feed-skeleton" />
                 <div className="skeleton feed-skeleton" />
               </>
-            ) : posts.length ? (
-              posts.map((post) => (
+            ) : visibleJournalPosts.length ? (
+              visibleJournalPosts.map((post) => (
                 <article key={post.id} className="feed-card">
                   <div className="feed-date">{formatDate(post.createdAt)}</div>
-                  <h3>{selectedMeeting?.locationName ?? "Meeting log"}</h3>
-                  <p className={`feed-copy ${decryptedPosts[post.id] ? "is-revealed" : "is-locked"}`}>
-                    {decryptedPosts[post.id] ?? "Encrypted memory waiting behind the glass."}
+                  <h3>{post.meeting.title}</h3>
+                  <p className="muted-copy">
+                    By {post.authorName} · {formatDateTime(post.meeting.meetingAt)} · {post.meeting.locationName}
+                  </p>
+                  <p className={`feed-copy ${decryptedVisiblePosts[post.id] ? "is-revealed" : "is-locked"}`}>
+                    {decryptedVisiblePosts[post.id] ?? "Encrypted memory waiting behind the glass."}
                   </p>
 
                   <div className="feed-actions">
-                    <button className="secondary-button small-button" type="button" onClick={decryptLoadedPosts}>
+                    <button className="secondary-button small-button" type="button" onClick={decryptVisibleJournalPosts}>
                       <LockIcon />
                       Decrypt
                     </button>
@@ -1351,7 +1619,7 @@ export const App = () => {
             ) : (
               <div className="empty-state">
                 <LockIcon />
-                <p>No posts loaded yet. Click a meeting marker to bring one in.</p>
+                <p>No released posts yet. They appear here after release time.</p>
               </div>
             )}
           </div>

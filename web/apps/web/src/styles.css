@@ -748,6 +748,44 @@ textarea {
   box-shadow: var(--shadow-card);
 }
 
+.journal-home-map {
+  min-height: 560px;
+}
+
+.journal-home-meta {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.post-map-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+}
+
+.post-map-wrap {
+  min-height: 360px;
+}
+
+.post-meta-form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.recent-post-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: center;
+  border-bottom: 1px solid rgba(224, 216, 204, 0.8);
+  padding: 0.7rem 0;
+}
+
+.recent-post-row:last-child {
+  border-bottom: 0;
+}
+
 .compose-shell {
   padding: 1rem;
 }
@@ -1101,7 +1139,8 @@ textarea {
   .journal-layout,
   .meetings-layout,
   .admin-grid,
-  .action-strip {
+  .action-strip,
+  .post-map-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1136,7 +1175,8 @@ textarea {
   .grid-two-up,
   .admin-grid,
   .workspace-shell,
-  .meetings-layout {
+  .meetings-layout,
+  .journal-home-meta {
     grid-template-columns: 1fr;
   }
 }
@@ -1145,6 +1185,18 @@ textarea {
   .app-shell,
   .auth-shell {
     width: min(100%, calc(100% - 1rem));
+  }
+
+  .auth-card {
+    padding: 1.05rem;
+  }
+
+  .auth-tabs {
+    margin: 0.8rem 0 1rem;
+  }
+
+  .auth-submit {
+    padding: 0.85rem 0.95rem;
   }
 
   .top-bar {
