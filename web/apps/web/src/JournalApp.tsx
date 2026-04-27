@@ -1443,7 +1443,8 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.journals}</p>
-              <h2>Shared notebooks, kept quiet.</h2>
+              <h2>Keep one journal for the moment you’re in.</h2>
+              <p className="muted-copy">Start a new notebook, or join an existing one with a code. Nothing louder than that.</p>
             </div>
           </div>
 
@@ -1459,7 +1460,7 @@ export const App = () => {
               </label>
               <button className="primary-button" type="submit">
                 <PlusIcon />
-                Create Journal
+                Start journal
               </button>
             </form>
 
@@ -1469,7 +1470,7 @@ export const App = () => {
                 <input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} placeholder="Enter code" />
               </label>
               <button className="secondary-button" type="submit">
-                Join via Code
+                Join journal
               </button>
             </form>
           </div>
@@ -1490,7 +1491,6 @@ export const App = () => {
                     className={`journal-card ${journal.id === selectedJournalId ? "is-selected" : ""}`}
                     onClick={() => {
                       setSelectedJournalId(journal.id);
-                      setActiveSection("journalHome");
                     }}
                   >
                     <div className="card-topline">
@@ -1517,6 +1517,12 @@ export const App = () => {
                 <p className="muted-copy">
                   {selectedJournal ? `Created ${formatDate(selectedJournal.createdAt)}. The key lives with the group.` : "Select a journal card, or create a new one above."}
                 </p>
+              </div>
+
+              <div className="journal-actions">
+                <button className="primary-button" type="button" onClick={() => setActiveSection("journalHome")} disabled={!selectedJournalId}>
+                  Open journal
+                </button>
               </div>
 
               <form className="stack-tight journal-form" onSubmit={renameJournal}>
@@ -1576,16 +1582,17 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.meetings}</p>
-              <h2>Meetings keep the thread, and old ones stay editable.</h2>
+              <h2>Pin the moment, then leave it alone.</h2>
+              <p className="muted-copy">Every meeting stays on the map and can be edited later if the details shift.</p>
             </div>
             <div className="section-actions">
               <button className="secondary-button" type="button" onClick={useCurrentPosition}>
                 <LocationIcon />
-                Use My Location
+                Use current location
               </button>
               <button className="secondary-button" type="button" onClick={resetMeetingForm}>
                 <PlusIcon />
-                New meeting
+                New marker
               </button>
             </div>
           </div>
@@ -1670,7 +1677,7 @@ export const App = () => {
                 ) : null}
 
                 <button className="primary-button" type="submit" disabled={!selectedJournalId}>
-                  {meetingEditorId ? "Update Meeting" : "Seal Meeting Marker"}
+                  {meetingEditorId ? "Update marker" : "Seal meeting"}
                 </button>
               </form>
 
@@ -1771,20 +1778,21 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.journalHome}</p>
-              <h2>{selectedJournal?.name ?? "Select a journal"}</h2>
+              <h2>{selectedJournal?.name ?? "Open a journal"}</h2>
+              <p className="muted-copy">A quiet overview of the places, posts, and plans inside this notebook.</p>
             </div>
             <div className="section-actions">
               <button className="secondary-button" type="button" onClick={() => setActiveSection("posts")} disabled={!selectedJournalId}>
                 <PostIcon />
-                New Post
+                Write post
               </button>
               <button className="secondary-button" type="button" onClick={() => setActiveSection("visible")} disabled={!selectedJournalId}>
                 <VisibleIcon />
-                Released Posts
+                Open capsule
               </button>
               <button className="secondary-button" type="button" onClick={() => setActiveSection("bucket")} disabled={!selectedJournalId}>
                 <CheckIcon />
-                Bucket List
+                Plans
               </button>
             </div>
           </div>
@@ -1837,12 +1845,13 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.bucket}</p>
-              <h2>Shared plans for this journal.</h2>
+              <h2>Small plans, clearly kept.</h2>
+              <p className="muted-copy">Add ideas, mark them done, and keep the list lightweight enough to actually use.</p>
             </div>
             <div className="section-actions">
               <button className="secondary-button" type="button" onClick={useCurrentBucketPosition}>
                 <LocationIcon />
-                Use My Location
+                Use current location
               </button>
             </div>
           </div>
@@ -1852,7 +1861,7 @@ export const App = () => {
               <div className="row-between">
                 <div>
                   <p className="eyebrow">Item creation</p>
-                  <h4>Open the dropdown to add an item</h4>
+                  <h4>Add one thing at a time</h4>
                 </div>
                 <button className="secondary-button" type="button" onClick={() => setBucketComposerOpen((value) => !value)}>
                   {bucketComposerOpen ? "Hide" : "Add item"}
@@ -1951,7 +1960,7 @@ export const App = () => {
                   </div>
                   <button className="primary-button" type="submit" disabled={!selectedJournalId || !bucketName.trim()}>
                     <PlusIcon />
-                    Add Item
+                    Add plan
                   </button>
                 </form>
               ) : null}
@@ -2040,7 +2049,8 @@ export const App = () => {
           <div className="section-head">
             <div>
               <p className="eyebrow">{sectionTitleMap.posts}</p>
-              <h2>Write to a meeting. No detours, no editing the event from here.</h2>
+              <h2>Write to a meeting and seal it gently.</h2>
+              <p className="muted-copy">Keep the note tied to one place, then let the attachments and release time do the rest.</p>
             </div>
             <div className="section-actions">
               <span className="lock-badge">
@@ -2193,7 +2203,7 @@ export const App = () => {
               <div className="compose-footer">
                 <span className="muted-copy">{postText.length} characters</span>
                 <button className="primary-button seal-button" type="submit">
-                  Seal &amp; Publish
+                  Seal post
                 </button>
               </div>
             </form>
@@ -2582,10 +2592,7 @@ export const App = () => {
               <span className="eyebrow">Google one-click</span>
               <div ref={googleButtonRef} className="google-button-slot" />
               {!GOOGLE_CLIENT_ID ? (
-                <button className="secondary-button google-fallback" type="button" disabled>
-                  <GoogleIcon />
-                  Continue with Google
-                </button>
+                <p className="muted-copy google-fallback-note">Google sign-in appears here when the client ID is configured.</p>
               ) : null}
             </div>
 
