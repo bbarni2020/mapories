@@ -104,7 +104,7 @@ type PlaceSearchResult = {
 
 type SectionKey = "journals" | "journalHome" | "bucket" | "meetings" | "posts" | "visible" | "admin";
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+// const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 const DEFAULT_CENTER: [number, number] = [47.4979, 19.0402];
 const AUTH_WORLD_CENTER: [number, number] = [20, 0];
 
@@ -353,11 +353,11 @@ const PlusIcon = () => (
   </Glyph>
 );
 
-const GoogleIcon = () => (
-  <span className="google-mark" aria-hidden="true">
-    G
-  </span>
-);
+// const GoogleIcon = () => (
+//   <span className="google-mark" aria-hidden="true">
+//     G
+//   </span>
+// );
 
 const MapClickPicker = ({ onPick }: { onPick: (latitude: number, longitude: number) => void }) => {
   useMapEvents({
@@ -395,7 +395,7 @@ export const App = () => {
   const [error, setError] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<"signIn" | "register">("signIn");
   const [activeSection, setActiveSection] = useState<SectionKey>("journals");
-  const googleButtonRef = useRef<HTMLDivElement | null>(null);
+  // const googleButtonRef = useRef<HTMLDivElement | null>(null);
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -1389,38 +1389,38 @@ export const App = () => {
     setError(`Copied invite code ${code}`);
   };
 
-  useEffect(() => {
-    if (!GOOGLE_CLIENT_ID || !window.google || !googleButtonRef.current || token) {
-      return;
-    }
-
-    window.google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      auto_select: true,
-      use_fedcm_for_prompt: true,
-      callback: async (response) => {
-        try {
-          const auth = await api.post<AuthResponse>("/auth/google", {
-            idToken: response.credential,
-          });
-          onAuthSuccess(auth.data);
-        } catch {
-          setError("Google login failed");
-        }
-      },
-    });
-
-    googleButtonRef.current.innerHTML = "";
-    window.google.accounts.id.renderButton(googleButtonRef.current, {
-      type: "standard",
-      theme: "outline",
-      size: "large",
-      text: "signin_with",
-      shape: "rectangular",
-    });
-
-    window.google.accounts.id.prompt();
-  }, [token]);
+  // useEffect(() => {
+  //   if (!GOOGLE_CLIENT_ID || !window.google || !googleButtonRef.current || token) {
+  //     return;
+  //   }
+  //
+  //   window.google.accounts.id.initialize({
+  //     client_id: GOOGLE_CLIENT_ID,
+  //     auto_select: true,
+  //     use_fedcm_for_prompt: true,
+  //     callback: async (response) => {
+  //       try {
+  //         const auth = await api.post<AuthResponse>("/auth/google", {
+  //           idToken: response.credential,
+  //         });
+  //         onAuthSuccess(auth.data);
+  //       } catch {
+  //         setError("Google login failed");
+  //       }
+  //     },
+  //   });
+  //
+  //   googleButtonRef.current.innerHTML = "";
+  //   window.google.accounts.id.renderButton(googleButtonRef.current, {
+  //     type: "standard",
+  //     theme: "outline",
+  //     size: "large",
+  //     text: "signin_with",
+  //     shape: "rectangular",
+  //   });
+  //
+  //   window.google.accounts.id.prompt();
+  // }, [token]);
 
   useEffect(() => {
     if (!lightbox?.url) {
@@ -2588,6 +2588,7 @@ export const App = () => {
               </button>
             </form>
 
+            {/*
             <div className="google-card">
               <span className="eyebrow">Google one-click</span>
               <div ref={googleButtonRef} className="google-button-slot" />
@@ -2595,6 +2596,7 @@ export const App = () => {
                 <p className="muted-copy google-fallback-note">Google sign-in appears here when the client ID is configured.</p>
               ) : null}
             </div>
+            */}
 
             {error ? <p className="toast-note">{error}</p> : null}
           </div>
